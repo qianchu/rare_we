@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
 import numpy as np
@@ -35,7 +35,7 @@ from scipy.stats import pearsonr
 FLOAT = np.float32
 
 
-# In[2]:
+# In[ ]:
 
 
 
@@ -84,7 +84,7 @@ def top_cluster_density(top_vec,similarity_scores):
     return inf_score
 
 
-# In[3]:
+# In[ ]:
 
 
 def load_w2salience(model_w2v,w2salience_f,weight_type):
@@ -316,7 +316,7 @@ def output_embedding(w,w_target,word2index,word2index_target):
         return w_target_out,word2index_target_out
 
 
-# In[4]:
+# In[ ]:
 
 
 def filter_w(w,word2index,index2word):
@@ -346,7 +346,7 @@ def rm_stopw_context(model):
 
 
 
-# In[5]:
+# In[ ]:
 
 
 def cosine(context_avg,probe_w_vec):
@@ -762,7 +762,7 @@ def eval_card(card_f,model_param_f,context_model,model_type,n_result,w,index2wor
     
 
 
-# In[6]:
+# In[ ]:
 
 
 if __name__=="__main__":
