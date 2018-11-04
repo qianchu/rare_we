@@ -42,16 +42,13 @@ FLOAT = np.float32
 def produce_top_n_simwords(w_filter,context_embed,n_result,index2word,debug=False):
         #assume that w_filter is already normalized
         context_embed = context_embed / xp.sqrt((context_embed * context_embed).sum())
-        s = xp.sqrt((w_filter * w_filter).sum(1))
-        s[s==0.] = 1.
-        w_filter /= s.reshape((s.shape[0], 1))
         similarity_scores=[]
 #         print('producing top {0} simwords'.format(n_result))
         similarity = (w_filter.dot(context_embed)+1.0)/2
         top_words_i=[]
         top_words=[]
         count = 0
-        for i in (-similarity).argsort():
+        for i in (-similarity).argsort():                
                     if xp.isnan(similarity[i]):
                         continue
                     if debug==True:
@@ -154,11 +151,10 @@ def lg_model_out_w2v(top_words,w_target,word2index_target):
     
 def context_inform(test_s,test_w, model,model_type,n_result,w_filter,index2word,weight,w2entropy=None,w_target=None,word2index_target=None,index2word_target=None):
     #produce context representation and infromative score for each context
-
     test_s=test_s.replace(test_w, ' '+test_w+' ')
     words=test_s.split()
     pos=words.index(test_w)
-
+    print (test_s)
     score=1.0 #default score
     
     # Decide on the model
@@ -207,6 +203,7 @@ def context_inform(test_s,test_w, model,model_type,n_result,w_filter,index2word,
         score=score
     else:
         print ('weight mode {0} not recognized'.format(weight))
+    print ('score',score)
     return float(score),context_embed_out
 
 def additive_model(test_ss,test_w, model_type,model,n_result,w_filter,index2word,weight=False,w2entropy=None,w_target=None,word2index_target=None,index2word_target=None,f_w=None,context2vec_preembeds=None,scores=None,M=None):
@@ -780,13 +777,13 @@ if __name__=="__main__":
     if sys.argv[0]=='/usr/local/lib/python2.7/dist-packages/ipykernel_launcher.py':
         
         ###data:
-#         data='./eval_data/data-chimeras/dataset_alacarte.l2.fixed.test.txt.punct'
+        data='./eval_data/data-chimeras/dataset_alacarte.l2.fixed.test.txt.punct'
 #         data='./eval_data/data-nonces/n2v.definitional.dataset.test.txt'
 #         data='./eval_data/card-660/dataset.tsv'
-        data='./eval_data/CRW/CRW-562.txt'
+#         data='./eval_data/CRW/CRW-562.txt'
 #         weights=[WEIGHT_DICT[0],WEIGHT_DICT[3]]
-        weights=[WEIGHT_DICT[0]]
-        gpu=-1
+        weights=[WEIGHT_DICT[5]]
+        gpu=1
         model_type='context2vec-skipgram'
         w2salience_f=None
         matrix_f=None
@@ -794,14 +791,14 @@ if __name__=="__main__":
         trials=100
         context_flag=True
 #         matrix_f='../models/ALaCarte/transform/nonce_samecorpus.bin'
-        skipgram_model_f='./eval_data/CRW/vectors.txt'
-#         skipgram_model_f='../models/wiki_all.model/wiki_all.sent.split.model'
+#         skipgram_model_f='./eval_data/CRW/vectors.txt'
+        skipgram_model_f='../models/wiki_all.model/wiki_all.sent.split.model'
 #         skipgram_model_f='../models/glove/glove.840B.300d.w2vformat.txt'
 #         skipgram_model_f='../models/conceptnet/numberbatch-en-17.06.txt'
-#         context2vec_model_f='../models/context2vec/model_dir/MODEL-wiki.params.12'
-        context2vec_model_f='../models/context2vec/model_dir/MODEL-WWCsub-400dim.params.8'
+        context2vec_model_f='../models/context2vec/model_dir/MODEL-wiki.params.12'
+#         context2vec_model_f='../models/context2vec/model_dir/MODEL-WWCsub-400dim.params.8'
         ######w2salience_f
-#         w2salience_f='../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab'
+        w2salience_f='../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab'
 #         w2salience_f='../corpora/corpora/WWC_norarew.txt.tokenized.vocab'
 #         w2salience_f='../models/lda/w2entropy'
 
@@ -989,7 +986,7 @@ if __name__=="__main__":
 import time
 start_time = time.time()
 print (os.path.basename(os.path.split(data)[0]))
-trials=1
+#     trials=1
 #     data='./eval_data/data-chimeras/dataset_alacarte.l6.fixed.test.txt.punct'
 #     data='./eval_data/data-nonces/n2v.definitional.dataset.test.txt'
 
