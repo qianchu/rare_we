@@ -28,11 +28,23 @@ import math
 import collections
 import argparse
 import h5py
+import pdb
 
 from collections import defaultdict
 from gensim.models import KeyedVectors
 from scipy.stats import pearsonr
 FLOAT = np.float32
+
+
+# In[ ]:
+
+
+#helper function
+def matrix_norm(w):
+    s = xp.sqrt((w * w).sum(1))
+    s[s==0.] = 1.
+    w /= s.reshape((s.shape[0], 1))
+    return w
 
 
 # In[ ]:
@@ -160,6 +172,7 @@ def context_inform(test_s,test_w, model,model_type,n_result,w_filter,index2word,
     # Decide on the model
     if model_type=='context2vec':
             context_embed= model.context2vec(words, pos)
+            context_embed_out=xp.array(context_embed)
 
     elif model_type=='skipgram' or model_type=='a la carte':
         score,context_embed=skipgram_context(model,words,pos,weight,w2entropy)
@@ -392,26 +405,40 @@ def update_mrr(nns,nonce,mrr,ranks):
     print rr,mrr
     return mrr,ranks
 
+def similar_by_vector(w,model_w2v, index2word,context_avg):
+    if type(model_w2v)=='gensim.models.word2vec.Word2Vec':
+        if xp==cuda.cupy:
+                context_avg=xp.asnumpy(context_avg)
+        nns=model_w2v.similar_by_vector(context_avg,topn=len(model_w2v.wv.vocab))
+    else:
+        context_avg = context_avg / xp.sqrt((context_avg * context_avg).sum())
+        w=matrix_norm(w)
+        similarity = (w.dot(context_avg)+1.0)/2
+        nns=[(index2word[int(i)], similarity[int(i)]) for i in (-similarity).argsort()] 
+    return nns
+        
 def eval_nonce(nonce_data_f,context_model,model_w2v,model_type,n_result,w,index2word,word2index,weight=False,w2entropy=None,w_target=None,word2index_target=None,index2word_target=None,contexts=None,M=None):
         #read in contexts
         ranks = []
         mrr = 0.0
         data=pd.read_csv(os.path.join(nonce_data_f),delimiter='\t',header=None,comment='#')
-        
+        w_target_out,word2index_target_out=output_embedding(w,w_target,word2index,word2index_target)
+
         for index, row in data.iterrows():
             if index>100 and index%100==0:
                 print (index)
             sents=preprocess_nonce(row[1],contexts)
             nonce=row[0]
-            if nonce not in model_w2v:
+            if nonce not in word2index_target_out:
                 print ('{0} not known'.format(nonce))
                 continue
             context_avg=contexts_per_tgw(sents,model_type,context_model,n_result,w,index2word,weight,w2entropy,w_target,word2index_target,index2word_target,M=M)
-            if xp==cuda.cupy:
-                context_avg=xp.asnumpy(context_avg)
+            
                 
             # MRR Rank calculation
-            nns=model_w2v.similar_by_vector(context_avg,topn=len(model_w2v.wv.vocab))
+            print (type(index2word))
+
+            nns=similar_by_vector(w,model_w2v, index2word,context_avg)
             mrr,ranks=update_mrr(nns,nonce,mrr,ranks)
 
         print ("Final MRR: ",mrr,len(ranks),float(mrr)/float(len(ranks)))
@@ -449,10 +476,11 @@ def eval_nonce_withcontexts(nonce_data_f,context_model,model_w2v,model_type,n_re
     scores=None
 #     start evaluation
     contexts_f=os.path.join(os.path.dirname(nonce_data_f),'contexts')
-    
+    w_target_out,word2index_target_out=output_embedding(w,w_target,word2index,word2index_target)
+
     for index, row in data.iterrows():
         rw=row[0]
-        if rw not in model_w2v:
+        if rw not in word2index_target_out:
                 print ('{0} not known'.format(rw))
                 continue
         contexts_w_f=os.path.join(contexts_f,rw+'.txt')
@@ -469,8 +497,11 @@ def eval_nonce_withcontexts(nonce_data_f,context_model,model_w2v,model_type,n_re
         if 'context2vec' in model_type.split('?')[0]:
                 if model_type=='context2vec-skipgram?skipgram':
                     context2vec_preembeds_all,scores_all=load_contexts(rw,sents_all,context_model[0],model_type.split('?')[0],n_result,w[0],index2word[0],weight[0],w2entropy[0],w_target[0],word2index_target[0],index2word_target[0])
-                elif model_type=='context2vec-skipgram':
+                elif model_type=='context2vec-skipgram' or 'context2vec':
                     context2vec_preembeds_all,scores_all=load_contexts(rw,sents_all,context_model,model_type.split('?')[0],n_result,w,index2word,weight[0],w2entropy,w_target,word2index_target,index2word_target)
+#                 elif model_type=='context2vec':
+#                     context2vec_preembeds_all,scores_all=load_contexts(rw,sents_all,context_model,model_type,n_result,w,index2word,weight,w2entropy,w_target,word2index_target,index2word_target)
+
                 orders_inf=(-scores_all).argsort()
         #do trials
         for trial in range(trials):
@@ -483,11 +514,9 @@ def eval_nonce_withcontexts(nonce_data_f,context_model,model_w2v,model_type,n_re
                 context_avg=contexts_per_tgw(sents,model_type,context_model,n_result,w,index2word,weight,w2entropy,w_target,word2index_target,index2word_target,context2vec_preembeds,scores,M=M)
                 
                 if type(context_avg)!=type(None):
-                    if xp==cuda.cupy:
-                        context_avg=xp.asnumpy(context_avg)
-                
                     # MRR Rank calculation
-                    nns=model_w2v.similar_by_vector(context_avg,topn=len(model_w2v.wv.vocab))
+                    print (type(index2word))
+                    nns=similar_by_vector(w, model_w2v, index2word,context_avg)
                     mrrs[trial][freq],ranks[trial][freq]=update_mrr(nns,rw,mrrs[trial][freq],ranks[trial][freq])
     mrr_res=defaultdict(list)
     median_res=defaultdict(list)
@@ -617,7 +646,7 @@ def eval_crw_stf(crw_stf_f,model_param_f,context_model,model_type,n_result,w,ind
                 rw_prev=rw
                 if model_type=='context2vec-skipgram?skipgram':
                     context2vec_preembeds_all,scores_all=load_contexts(rw,sents_all,context_model[0],model_type.split('?')[0],n_result,w[0],index2word[0],weight[0],w2entropy[0],w_target[0],word2index_target[0],index2word_target[0])
-                elif model_type=='context2vec-skipgram':
+                elif model_type=='context2vec-skipgram' or 'context2vec':
                     context2vec_preembeds_all,scores_all=load_contexts(rw,sents_all,context_model,model_type.split('?')[0],n_result,w,index2word,weight[0],w2entropy,w_target,word2index_target,index2word_target)
                 orders_inf=(-scores_all).argsort()
         #do trials
@@ -782,9 +811,9 @@ if __name__=="__main__":
 #         data='./eval_data/card-660/dataset.tsv'
 #         data='./eval_data/CRW/CRW-562.txt'
 #         weights=[WEIGHT_DICT[0],WEIGHT_DICT[3]]
-        weights=[WEIGHT_DICT[5]]
+        weights=[WEIGHT_DICT[0]]
         gpu=1
-        model_type='context2vec-skipgram'
+        model_type='context2vec'
         w2salience_f=None
         matrix_f=None
         n_result=20
@@ -805,6 +834,9 @@ if __name__=="__main__":
 
         if model_type=='skipgram' or model_type =='a la carte':
             model_param_file=skipgram_model_f
+        elif model_type=='context2vec':
+            model_param_file=context2vec_model_f
+
         elif model_type=='context2vec-skipgram':
             model_param_file=context2vec_model_f+'?'+skipgram_model_f
         elif model_type=='context2vec-skipgram?skipgram':
@@ -869,6 +901,7 @@ if __name__=="__main__":
     if model_type=='context2vec':
         #read in model
         w,index2word,word2index,model=read_context2vec(model_param_file,gpu)
+        model_w2v=None
         w_target=None
         word2index_target=None
         index2word_target=None
@@ -877,9 +910,7 @@ if __name__=="__main__":
         model_w2v=read_w2v(model_param_file)
         w=xp.array(deepcopy(model_w2v.wv.vectors))
         #vector normalize for target w embedding, consistent with context2vec w and convenient for cosine computation among substitutes
-        s = xp.sqrt((w * w).sum(1))
-        s[s==0.] = 1.
-        w /= s.reshape((s.shape[0], 1))
+        w=matrix_norm(w)
         
         index2word=model_w2v.wv.index2word
         word2index={key: model_w2v.wv.vocab[key].index for key in model_w2v.wv.vocab}
@@ -910,9 +941,7 @@ if __name__=="__main__":
         model_skipgram = model_w2v
         w_skipgram=xp.array(deepcopy(model_skipgram.wv.vectors))
         #vector normalize for probe w embedding for calculating top vector similarity
-        s = xp.sqrt((w_skipgram * w_skipgram).sum(1))
-        s[s==0.] = 1.
-        w_skipgram /= s.reshape((s.shape[0], 1))
+        w=matrix_norm(w)
         
         index2word_skipgram=model_skipgram.wv.index2word
         word2index_skipgram={key: model_skipgram.wv.vocab[key].index for key in model_skipgram.wv.vocab}
@@ -927,9 +956,7 @@ if __name__=="__main__":
         model_w2v=read_w2v(model_param_file)
         w=xp.array(deepcopy(model_w2v.wv.vectors))
         #vector normalize for target w embedding, consistent with context2vec w and convenient for cosine computation among substitutes
-        s = xp.sqrt((w * w).sum(1))
-        s[s==0.] = 1.
-        w /= s.reshape((s.shape[0], 1))
+        w=matrix_norm(w)
         
         index2word=model_w2v.wv.index2word
         word2index={key: model_w2v.wv.vocab[key].index for key in model_w2v.wv.vocab}
@@ -986,6 +1013,8 @@ if __name__=="__main__":
 import time
 start_time = time.time()
 print (os.path.basename(os.path.split(data)[0]))
+#     context_flag=False
+
 #     trials=1
 #     data='./eval_data/data-chimeras/dataset_alacarte.l6.fixed.test.txt.punct'
 #     data='./eval_data/data-nonces/n2v.definitional.dataset.test.txt'
@@ -1005,6 +1034,8 @@ elif os.path.basename(os.path.split(data)[0])=='CRW':
     
         model_predicts,sps=eval_crw_stf(data,model_param_file,model,model_type,n_result,w,index2word,word2index,weights,w2salience,w_target,word2index_target,index2word_target,trials,M=transform)
 
+
+
 elif os.path.basename(os.path.split(data)[0])=='card-660':
 #             import pdb; pdb.set_trace()
 
@@ -1013,4 +1044,10 @@ elif os.path.basename(os.path.split(data)[0])=='card-660':
 print("--- %s seconds ---" % (time.time() - start_time))
 
 
+
+
+# In[ ]:
+
+
+len(w)
 
