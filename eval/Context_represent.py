@@ -1,7 +1,6 @@
 
 # coding: utf-8
 
-# In[12]:
 import nltk
 nltk.download('stopwords')
 from nltk.corpus import stopwords
@@ -18,24 +17,22 @@ import unittest
 from gensim.models import KeyedVectors
 
 
-
-#define models
+# define models
 CONTEXT2VEC='context2vec'
 CONTEXT2VEC_SUB='context2vec-skipgram'
 A_LA_CARTE='alacarte'
 SKIPGRAM='skipgram'
 SKIPGRAM_ISF='skipgram_isf'
-CONTEXT2VEC_SUB__SKIPGRAM_ISF='context2vec-skipgram?skipgram'
+CONTEXT2VEC_SUB__SKIPGRAM=CONTEXT2VEC_SUB+'__'+SKIPGRAM
+CONTEXT2VEC_SUB__SKIPGRAM_ISF=CONTEXT2VEC_SUB+'__'+SKIPGRAM_ISF
 DTYPE = 'float64'
 ALACARTE_FLOAT = np.float32
 
 stopw = stopwords.words('english')
 stopw = [word.encode('utf-8') for word in stopw]
 
-# In[2]:
 
-
-#helper function
+# helper function
 def remove_stopword(word):
 
     if word not in stopw:
@@ -43,38 +40,35 @@ def remove_stopword(word):
     else:
         return None
     
-   
 
-
-# In[3]:
-
-
-
-#general related functions
+# general related functions
 def load_model_fromfile(context2vec_param_file,skipgram_param_file,gpu):
-    context2vec_modelreader=None
-    model_skipgram=None
-    if context2vec_param_file != None:
-        context2vec_modelreader = ModelReader(context2vec_param_file, gpu)
-    if skipgram_param_file != None:
-        model_skipgram = read_skipgram(skipgram_param_file)
-    return context2vec_modelreader,model_skipgram
+    context2vec_modelreader_out=None
+    model_skipgram_out=None
+    if type(context2vec_param_file) == str:
+        context2vec_modelreader_out = ModelReader(context2vec_param_file, gpu)
+    if type(skipgram_param_file) == str:
+        model_skipgram_out = read_skipgram(skipgram_param_file)
+    return context2vec_modelreader_out,model_skipgram_out
+
 
 def read_skipgram(model_param_file):
         if not model_param_file.endswith('txt'):
-            model_skipgram = gensim.models.Word2Vec.load(model_param_file)
+            model_skipgram_out = gensim.models.Word2Vec.load(model_param_file)
         else:
-            model_skipgram = KeyedVectors.load_word2vec_format(model_param_file)
+            model_skipgram_out = KeyedVectors.load_word2vec_format(model_param_file)
        
-        return model_skipgram
+        return model_skipgram_out
+
 
 def read_context2vec(model_reader):
-    w = xp.array(model_reader.w)
+    w = model_reader.w
     index2word = model_reader.index2word
     word2index=model_reader.word2index
     model = model_reader.model
 
     return w,index2word,word2index,model
+
 
 def process_sent(test_s,test_w):
     test_s=test_s.replace(test_w, ' '+test_w+' ')
@@ -82,90 +76,42 @@ def process_sent(test_s,test_w):
     pos=words.index(test_w)
     return words,pos
 
+
 def load_w2salience(model_w2v,w2salience_f):
     w2salience={}
     with open(w2salience_f) as f:
         for line in f:
-            line=line.strip()
-            if line=='':
+            line = line.strip()
+            if line == '':
                 continue
             if line.startswith('sentence total'):
-                sent_total=int(line.split(':')[1])
+                sent_total = int(line.split(':')[1])
                 continue
             w,w_count,s_count=line.split('\t')
             if model_w2v.wv.__contains__(w):
                     w2salience[w]=math.log(1+sent_total/float(s_count))
     return w2salience
 
-def produce_top_n_simwords(w_filter,context_embed,n_result,index2word,debug=False):
-        #assume that w_filter is already normalized
-        context_embed = context_embed / sqrt((context_embed * context_embed).sum())
-        similarity_scores=[]
-#         print('producing top {0} simwords'.format(n_result))
-        similarity = (w_filter.dot(context_embed)+1.0)/2
-        top_words_i=[]
-        top_words=[]
-        count = 0
-        for i in (-similarity).argsort():                
-                    if xp.isnan(similarity[i]):
-                        continue
-                    if debug==True:
-                        try:
-                            print('{0}: {1}'.format(str(index2word[int(i)]), str(similarity[int(i)])))
-                        except UnicodeEncodeError as e:
-                            print (e)
-                            
-                    count += 1
-                    top_words_i.append(int(i))
-                    top_words.append(index2word[int(i)])
-                    similarity_scores.append(float(similarity[int(i)]))
-                    if count == n_result:
-                        break
 
-        top_vec=w_filter[top_words_i,:]
-        return top_vec,xp.array(similarity_scores),top_words
- 
-
-def lg_model_out_w2v(top_words,w_target,word2index_target):
-        # lg model substitutes in skipgram embedding
-        top_vec=[]
-        index_list=[]
-        for i,word in enumerate(top_words):
-            try :
-                top_vec.append(w_target[word2index_target[word]])
-                index_list.append(i)
-            except KeyError as e:
-                pass
-#                 print ('lg subs {0} not in w2v'.format(e))
-        if top_vec==[]:
-            print ('no lg subs in w2v space')
-            return xp.array([]),[]
-        else:
-            return xp.stack(top_vec),index_list
-    
 def load_transform(Afile,model_dimension):
-    '''loads the transform from a text file
+    """loads the transform from a text file
     Args:
     Afile: string; transform file name
     Returns:
     numpy array
-    '''
-    if Afile==None:
+    """
+    if Afile is None:
         return None
     elif Afile.endswith('bin'):
         M = np.fromfile(Afile, dtype=ALACARTE_FLOAT)
         d = int(np.sqrt(M.shape[0]))
         assert d == model_dimension, "induction matrix dimension and word embedding dimension must be the same"
         M = M.reshape(d, d)
-        M=xp.array(M)
+        M=M
         return M
     elif Afile.endswith('txt'):
         with open(Afile, 'r') as f:
-            return xp.array(np.vstack([np.array([ALACARTE_FLOAT(x) for x in line.split()]) for line in f]))
- 
-
-
-# In[4]:
+            return np.vstack([np.array([ALACARTE_FLOAT(x) for x in line.split()]) for line in f])
 
 
 # main class
@@ -173,19 +119,21 @@ def load_transform(Afile,model_dimension):
 class ContextModel():
     def __init__(self, model_type, gpu=-1, context2vec_modelreader=None,skipgram_model=None, n_result=20, ws_f=None,matrix_f=None):
         self.gpu=gpu
+        self.xp = cuda.cupy if self.gpu >= 0 else np
+
         self.model_type=model_type
-        self.n_result=20 if n_result ==None else n_result
+        self.n_result=20 if n_result is None else n_result
         
         self.load_model(context2vec_modelreader,skipgram_model)
-        self.word_weight=load_w2salience(self.model_skipgram,ws_f) if ws_f!=None else None
-        self.alacarte_m=load_transform(matrix_f,self.model_dimension)
+        self.word_weight=load_w2salience(self.model_skipgram,ws_f) if ws_f is not None else None
+        self.alacarte_m=self.xp.array(load_transform(matrix_f,self.model_dimension)) if matrix_f is not None else None
 
-   
     def load_model(self, context2vec_modelreader,skipgram_model):
-        if type(context2vec_modelreader)!=type(None):
+        if context2vec_modelreader is not None:
             self.context2vec_w,self.context2vec_index2word,self.context2vec_word2index,self.context2vec_model=read_context2vec(context2vec_modelreader)
+            self.context2vec_w=self.xp.array(self.context2vec_w)
             self.model_dimension=self.context2vec_w[0].shape[0]
-        if type(skipgram_model) !=type(None):
+        if skipgram_model is not None:
             self.model_skipgram=skipgram_model
             self.model_skipgram_word2index = {key: self.model_skipgram.wv.vocab[key].index for key in self.model_skipgram.wv.vocab}
             self.model_dimension=self.model_skipgram.wv.vectors[0].shape[0]
@@ -197,9 +145,9 @@ class ContextModel():
         elif model==CONTEXT2VEC_SUB:
             context_rep=self.context2vec_sub(words,pos)
         elif model==SKIPGRAM or model==SKIPGRAM_ISF:
-            context_rep=self.skipgram_context(words, pos)
+            context_rep=self.skipgram_context(model,words, pos)
         elif model==A_LA_CARTE:
-            context_rep=self.skipgram_context(words=words, pos=pos,stopw_rm=False)
+            context_rep=self.skipgram_context(model,words=words, pos=pos,stopw_rm=False)
         else:
             print ('WARNING: incorrect model type{0}'.format(model))
         return context_rep
@@ -210,17 +158,19 @@ class ContextModel():
         for test_id in range(len(test_ss)):
             test_s=test_ss[test_id]
             test_s=test_s.lower().strip()
-            context_out.append(self.compute_context_rep(test_s,test_w,model))
-        
+            context_rep=self.compute_context_rep(test_s, test_w, model)
+            if context_rep is not None:
+                context_out.append(context_rep)
         return context_out
     
     def compute_context_reps_ensemble(self,test_ss,test_w):
         context_out_ensemble=[]
-        for model in self.model_type.split('?'):
+        for model in self.model_type.split('__'):
             contexts_out=self.compute_context_reps(test_ss,test_w,model)
-            context_out=self.compute_context_reps_aggregate(contexts_out,model)
-            context_out_ensemble.append(context_out)
-        context_out=sum(context_out_ensemble)/len(context_out_ensemble)
+            if contexts_out:
+                context_out=self.compute_context_reps_aggregate(contexts_out,model)
+                context_out_ensemble.append(context_out)
+        context_out=sum(context_out_ensemble)/len(context_out_ensemble) if len(context_out_ensemble)!= 0 else None
         return context_out
     
     def compute_context_reps_aggregate(self,contexts_out,model):
@@ -230,16 +180,15 @@ class ContextModel():
 
         context_sum = sum(contexts_out)
 
-        if type(self.alacarte_m)!=type(None):
+        if self.alacarte_m is not None:
             context_out=self.alacarte_m.dot(context_sum)
         elif model ==SKIPGRAM or model==SKIPGRAM_ISF:
-            context_out = context_sum / sum(context_weights)
+            context_out = context_sum / sum(context_weights) #if sum(context_weights)!=0 else context_sum
         else:
             context_out=context_sum/len(contexts_out)
         return context_out
-    
-    
-    def skipgram_context(self,words,pos,stopw_rm=True):
+
+    def skipgram_context(self,model,words,pos,stopw_rm=True):
         context_wvs=[]
         weights=[]
         for i,word in enumerate(words):
@@ -247,7 +196,7 @@ class ContextModel():
                 if word in self.model_skipgram:
                     if stopw_rm==True and remove_stopword(word)==None:
                         continue
-                    if self.word_weight!=None:
+                    if model==SKIPGRAM_ISF:
                         weights.append(self.word_weight[word])
                         context_wvs.append(self.model_skipgram[word])
                     else:
@@ -256,27 +205,72 @@ class ContextModel():
                         weights.append(1.0)
                 else:
                     pass
-        context_embed=sum(np.array(context_wvs)*np.array(weights).reshape(len(weights),1))#/sum(weights)
-        return (sum(weights),context_embed)
+        context_embed=sum(self.xp.array(context_wvs)*self.xp.array(weights).reshape(len(weights),1))#/sum(weights)
+        if sum(weights)==0:
+            return None
+        return sum(weights),context_embed
 
-  
     
     def context2vec_sub(self,words,pos):
         context_rep=self.context2vec_model.context2vec(words, pos)
-        top_vec,sim_scores,top_words=produce_top_n_simwords(self.context2vec_w,context_rep, self.n_result, self.context2vec_index2word, debug=False)
-        top_vec,index_list=lg_model_out_w2v(top_words,self.model_skipgram.wv.vectors,self.model_skipgram_word2index)
-        
+        top_vec,sim_scores,top_words=self.produce_top_n_simwords(self.context2vec_w,context_rep, self.context2vec_index2word, debug=False)
+        top_vec,index_list=self.lg_model_out_w2v(top_words,self.model_skipgram.wv.vectors,self.model_skipgram_word2index)
+        if top_vec.shape[0]==0:
+            return None
         sim_scores=sim_scores[index_list] #weighted by substitute probability
-        context_rep=xp.array(sum(top_vec*((sim_scores/sum(sim_scores)).reshape(len(sim_scores),1))))
+        context_rep=self.xp.array(sum(top_vec*((sim_scores/sum(sim_scores)).reshape(len(sim_scores),1))))
+
         return context_rep
 
+    def produce_top_n_simwords(self,w_filter, context_embed, index2word, debug=False):
+        # assume that w_filter is already normalized
+        context_embed = context_embed / sqrt((context_embed * context_embed).sum())
+        similarity_scores = []
+        #         print('producing top {0} simwords'.format(n_result))
+        similarity = (w_filter.dot(context_embed) + 1.0) / 2
+        top_words_i = []
+        top_words = []
+        count = 0
+        for i in (-similarity).argsort():
+            if self.xp.isnan(similarity[i]):
+                continue
+            if debug == True:
+                try:
+                    print('{0}: {1}'.format(str(index2word[int(i)]), str(similarity[int(i)])))
+                except UnicodeEncodeError as e:
+                    print (e)
 
-# In[5]:
+            count += 1
+            top_words_i.append(int(i))
+            top_words.append(index2word[int(i)])
+            similarity_scores.append(float(similarity[int(i)]))
+            if count == self.n_result:
+                break
+
+        top_vec = w_filter[top_words_i, :]
+        return top_vec, self.xp.array(similarity_scores), top_words
+
+    def lg_model_out_w2v(self,top_words, w_target, word2index_target):
+        # lg model substitutes in skipgram embedding
+        top_vec = []
+        index_list = []
+        for i, word in enumerate(top_words):
+            try:
+                top_vec.append(w_target[word2index_target[word]])
+                index_list.append(i)
+            except KeyError as e:
+                pass
+        #                 print ('lg subs {0} not in w2v'.format(e))
+        if top_vec == []:
+            print ('no lg subs in w2v space')
+            return self.xp.array([]), []
+        else:
+            return self.xp.stack(top_vec), index_list
 
 
 # read in parameters and setup
 class ArgTest:
-    def __init__(self,model_type=None,gpu=-1,context2vec_param_file=None, skipgram_param_file=None, n_result=None,w2salience_f=None,matrix_f=None):
+    def __init__(self,model_type=None,gpu=-1,context2vec_param_file=None, skipgram_param_file=None, n_result=None,w2salience_f=None,matrix_f=None,data=None):
         self.context2vec_param_file=context2vec_param_file
         self.skipgram_param_file=skipgram_param_file
         self.model_type=model_type
@@ -284,15 +278,15 @@ class ArgTest:
         self.gpu=gpu
         self.w2salience_f=w2salience_f
         self.matrix_f=matrix_f
-    
+        self.data=data
     
 
-        
-def parse_args():
+def parse_args(test_files):
 
-    if sys.argv==[u'/Users/liuqianchu/OneDrive - University Of Cambridge/research/projects/year1/rare_we/eval/eval_ner.py']:
+    if len(sys.argv)==1:
+        print ('missing arguments..')
         print ('load test')
-        args=ArgTest(context2vec_param_file='../models/context2vec/model_dir/MODEL-wiki.params.14', skipgram_param_file='../models/wiki_all.model/wiki_all.sent.split.model')
+        args=ArgTest(context2vec_param_file=test_files['context2vec_param_file'], skipgram_param_file=test_files['skipgram_param_file'],w2salience_f=test_files['ws_f'],matrix_f=test_files['matrix_f'])
     else:
         parser = argparse.ArgumentParser(description='Evaluate on long tail emerging ner')
         parser.add_argument('--cm',  type=str,
@@ -311,21 +305,13 @@ def parse_args():
     return args  
 
 
-
- 
 def gpu_config(gpu):
     if gpu >= 0:
         cuda.check_cuda_available()
         cuda.get_device(gpu).use()    
     
 
-
-# In[14]:
-
-
-
-
-class TestCases(unittest.TestCase):
+class TestCases2(unittest.TestCase):
 
 
     def test_skipgram(self):
@@ -344,7 +330,7 @@ class TestCases(unittest.TestCase):
     #
     def test_skipgram_weight(self):
         CM = ContextModel(skipgram_model=model_skipgram, gpu=-1,
-                          model_type=SKIPGRAM_ISF,ws_f='../corpora/corpora/WWC_norarew.txt.tokenized.vocab')
+                          model_type=SKIPGRAM_ISF,ws_f=args.w2salience_f)
         context_final=CM.compute_context_reps_ensemble(test_ss=['enjoy fantastic ___', 'hate horrible ___'], test_w='___')
         self.assertSequenceEqual(list(context_final[:10]),[-0.01189851459631592, 0.05283826293922492, -0.1513647235980044, -0.13441699829444592, 0.23343511758950736, -0.016666721591838407, -0.03688059408256895, -0.16563471932318508, 0.1904964859077803, 0.06445073124726468]
 )
@@ -356,7 +342,10 @@ class TestCases(unittest.TestCase):
         CM = ContextModel(model_type=CONTEXT2VEC,context2vec_modelreader=context2vec_modelreader)
         context_final = CM.compute_context_reps_ensemble(test_ss=['enjoy fantastic ___', 'hate horrible ___'],
                                                          test_w='___')
-        self.assertTrue(xp.array(context_final[:10],dtype=DTYPE).all()==xp.array([0.25684038, -0.25186515, 0.8957876, -0.26476282, -0.7319275, 0.50767666, 0.5815378, -0.88842267, -0.19761798, 0.2660652],dtype=DTYPE).all())
+
+        self.assertSequenceEqual(xp.array(context_final[:10],dtype=DTYPE).tolist(),[0.25684037804603577, -0.2518651485443115, 0.8957875967025757, -0.264762818813324, -0.7319275140762329, 0.5076766610145569, 0.5815377831459045, -0.8884226679801941, -0.19761797785758972, 0.26606521010398865])
+
+
 
 
         
@@ -365,25 +354,60 @@ class TestCases(unittest.TestCase):
         context_final = CM.compute_context_reps_ensemble(test_ss=['enjoy fantastic ___', 'hate horrible ___'],
                                                          test_w='___')
 
-        self.assertTrue(xp.array(context_final[:10],dtype=DTYPE).all()==xp.array([ 0.03617461, -0.00782071,  0.01954992, -0.03950376,  0.09304708,
-       -0.17399982, -0.15108021, -0.0570719 ,  0.20490982,  0.02262263],dtype=DTYPE).all())
+        self.assertSequenceEqual(xp.array(context_final[:10],dtype=DTYPE).tolist(),[0.03617460706238733, -0.007820711145649039, 0.019549923907292616, -0.039503757222290006, 0.09304707848039491, -0.17399982461609498, -0.1510802085625014, -0.05707189624693221, 0.2049098161107866, 0.02262262570894833])
+
 
 
     def test_context_sub__skipgram_isf(self):
-        CM = ContextModel(model_type=CONTEXT2VEC_SUB__SKIPGRAM_ISF,skipgram_model=model_skipgram,context2vec_modelreader=context2vec_modelreader)
+        CM = ContextModel(model_type=CONTEXT2VEC_SUB__SKIPGRAM_ISF,skipgram_model=model_skipgram,context2vec_modelreader=context2vec_modelreader,ws_f=args.w2salience_f)
         context_final = CM.compute_context_reps_ensemble(test_ss=['enjoy fantastic ___', 'hate horrible ___'],
                                                          test_w='___')
-        self.assertTrue(xp.array(context_final[:10],dtype=DTYPE).all()==xp.array([ 0.01663587, 0.02642449, -0.07190355 ,-0.09002009 ,0.16509254 ,-0.09447437,
- -0.08746827, -0.10581389,  0.19385878,  0.0426106 ],dtype=DTYPE).all())
+        print (xp.array(context_final[:10],dtype=DTYPE).tolist())
+        self.assertSequenceEqual(xp.array(context_final[:10],dtype=DTYPE).tolist(),[0.012138046233035705, 0.022508775896787937, -0.06590739984535589, -0.08696037775836796, 0.16324109803495113, -0.09533327310396669, -0.09398040132253517, -0.11135330778505864, 0.19770315100928343, 0.04353667847810651]
+)
+
+    def test_zeroembed_context2vec_sub__skipgram_isf(self):
+            CM = ContextModel(model_type=CONTEXT2VEC_SUB__SKIPGRAM_ISF, skipgram_model=model_skipgram,
+                              context2vec_modelreader=context2vec_modelreader, ws_f=args.w2salience_f)
+            context_final = CM.compute_context_reps_ensemble(test_ss=['___ !!!', 'hate horrible ___'],
+                                                             test_w='___')
+            print (xp.array(context_final[:10], dtype=DTYPE).tolist())
+            self.assertSequenceEqual(xp.array(context_final[:10], dtype=DTYPE).tolist(),[-0.09380595129530858, -0.04850364374896774, -0.0945980830475423, -0.06501718103148113, 0.16707455899194756, -0.08880966052254462, -0.1424605893357314, -0.1779511408373386, 0.2257873964278589, -0.011529974631702328]
+)
+            context_final = CM.compute_context_reps_ensemble(test_ss=['___ !!!'],
+                                                             test_w='___')
+            print (xp.array(context_final[:10], dtype=DTYPE).tolist())
+            self.assertSequenceEqual (xp.array(context_final[:10], dtype=DTYPE).tolist(),[-0.17036895272432656, 0.002701252657169536, -0.11705178024697765, -0.08133737505526306, 0.06545005713556959, -0.18760140187941493, -0.1258137400099445, 0.05292429965888347, 0.011674809238628125, -0.02235100849392118]
+)
+
+    def test_zeroembed_skipgram_isf(self):
+            CM = ContextModel(model_type=SKIPGRAM_ISF, skipgram_model=model_skipgram,
+                              context2vec_modelreader=context2vec_modelreader, ws_f=args.w2salience_f)
+
+            context_final = CM.compute_context_reps_ensemble(test_ss=['___ !!!', 'hate horrible ___'],
+                                                             test_w='___')
+            print (xp.array(context_final[:10], dtype=DTYPE).tolist())
+            self.assertSequenceEqual(xp.array(context_final[:10], dtype=DTYPE).tolist(),[-0.0864773801172783, -0.07905169760413748, -0.12716803108544453, -0.05863167144488575, 0.24123352123807362, 0.012780462113240625, -0.1150145902789262, -0.34118844846907126, 0.33422660234170193, -0.012813033840733106]
+)
+            context_final = CM.compute_context_reps_ensemble(test_ss=['___ !!!'],
+                                                             test_w='___')
+            self.assertIsNone(context_final)
 
     def test_alacarte(self):
-        CM = ContextModel(model_type=A_LA_CARTE,skipgram_model=model_skipgram,matrix_f='../models/ALaCarte/transform/wiki_all_transform.bin')
+        CM = ContextModel(model_type=A_LA_CARTE,skipgram_model=model_skipgram,matrix_f=args.matrix_f)
         context_final = CM.compute_context_reps_ensemble(test_ss=['enjoy fantastic ___', 'hate horrible ___'],
                                                          test_w='___')
-        self.assertTrue(xp.array(context_final[:10],dtype=DTYPE).all()==xp.array([-0.26741879756799725, 0.1904742187106585, -0.20207293493171546, -0.035881038638455404, 0.031569901468545686, -0.02004283636814247, 0.04682512920053014, -0.6029695352643941, 0.24818600094342189, 0.18152202352953248],dtype=DTYPE).all())
+        self.assertSequenceEqual(xp.array(context_final[:10],dtype=DTYPE).tolist(),xp.array([-0.26741879756799725, 0.1904742187106585, -0.20207293493171546, -0.035881038638455404, 0.031569901468545686, -0.02004283636814247, 0.04682512920053014, -0.6029695352643941, 0.24818600094342189, 0.18152202352953248],dtype=DTYPE).tolist())
+
+
 if __name__=='__main__':
     print(sys.argv)
-    args = parse_args()
+    args = parse_args(test_files=
+        {'context2vec_param_file':'../models/context2vec/model_dir/MODEL-wiki.params.14',
+         'skipgram_param_file':'../models/wiki_all.model/wiki_all.sent.split.model',
+         'ws_f':'../corpora/corpora/WWC_norarew.txt.tokenized.vocab',
+         'matrix_f':'../models/ALaCarte/transform/wiki_all_transform.bin'
+         })
     #gpu setup
 
     gpu_config(args.gpu)
@@ -394,10 +418,6 @@ if __name__=='__main__':
     context2vec_modelreader, model_skipgram = load_model_fromfile(
         skipgram_param_file=args.skipgram_param_file,
         context2vec_param_file=args.context2vec_param_file, gpu=args.gpu)
-
-    # TestCases.test_skipgram(model_skipgram)
-    # CM=ContextModel(args.context2vec_param_file, args.skipgram_param_file, args.model_type, args.n_result, args.gpu,args.w2salience_f,args.matrix_f)
-    # CM.compute_context_rep('I like ___',"___")
 
     unittest.main(argv=['first-arg-is-ignored'], exit=False)
 
