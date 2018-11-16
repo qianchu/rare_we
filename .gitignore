@@ -5,6 +5,7 @@ eval/eval_data/ner/emerging_entities_17/
 eval/eval_data/card-660/contexts/
 eval/eval_data/data-nonces/contexts/
 eval/eval_data/CRW/
+eval/results/
 ALaCarte
 *weights_*
 .Trash-1000
