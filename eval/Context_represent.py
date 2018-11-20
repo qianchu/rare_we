@@ -118,7 +118,7 @@ def load_transform(Afile,model_dimension):
 
 class ContextModel():
     def __init__(self, model_type, gpu=-1, context2vec_modelreader=None,skipgram_model=None, n_result=20, ws_f=None,matrix_f=None):
-        self.gpu=gpu
+        self.gpu=-1 if gpu is None else gpu
         self.xp = cuda.cupy if self.gpu >= 0 else np
 
         self.model_type=model_type
