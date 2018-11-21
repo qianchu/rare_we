@@ -245,10 +245,46 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H):
     train_file.close()
     dev_file.close()
 
-def test(path):
-    model = TwoLayerNet()
+def test_output(y_pred,args,LABELS):
+    CCR = ConllCorpusReader(root=args.data, fileids='.conll',
+                            columntypes=('words', 'pos', 'ne', 'chunk'))
+    tagged_sents=CCR.tagged_sents(PARTITION['test'])
+    pred_conll=[]
+    counter=0
+    for tagged_sent in tagged_sents:
+        tags_position=return_tag_position(tagged_sent)
+        token_lst,tags_lst = zip(*tagged_sent)
+        tags_pred=deepcopy(list(tags_lst))
+        for tag_pos in tags_position:
+            for pos in range(tag_pos[0],tag_pos[1]):
+                tags_pred[pos]=tags_lst[pos][:2]+LABELS[y_pred[counter]]
+            counter+=1
+        pred_conll.append(zip(token_lst, tags_lst, tags_pred))
+    return pred_conll
+            # f.write('\n'.join([' '.join(token) for token in zip(token_lst, tags_lst, tags_pred)]))
+            # f.write('\n')
+
+def output_conll_to_file(pred_conll,output_fname):
+    with open(output_fname, 'w') as f:
+        f.write('\n\n'.join(['\n'.join(['	'.join(token) for token in sent]) for sent in pred_conll ]).encode('utf-8'))
+
+
+
+def test(path,test_data_embed_fname,H,labels2y):
+    test_file = h5py.File(test_data_embed_fname,'r')
+    embed_test=test_file['data']
+    D_in, D_out = embed_test[0].shape[0], len(labels2y)
+
+    model=TwoLayerNet(D_in,H,D_out)
     model.load_state_dict(torch.load(path))
     model.eval()
+
+    for data_batch, y in generate_embed_labels_batch(args, embed_test, len(embed_test), labels2y, 'test'):
+        # Forward pass: Compute predicted y by passing x to the model
+        y_pred = torch.max(model(torch.tensor(data_batch).float()),1)[1]
+
+    test_file.close()
+    return y_pred
 
 class TwoLayerNet(torch.nn.Module):
     def __init__(self, D_in, H, D_out):
@@ -280,23 +316,24 @@ if __name__ == "__main__":
     PARTITION = {'train': 'wnut17train.conll', 'test': 'emerging.test.annotated', 'dev': 'emerging.dev.conll'}
     LABELS2Y=from_label_to_y(LABELS)
     start_time = time.time()
+    Hidden_unit=100
 
     # 1. load args
     args = parse_args_ner(test_files=
                       {
-                          # 'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
+                          'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
                        'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
                        # 'ws_f': '../corpora/corpora/WWC_norarew.txt.tokenized.vocab',
                        # 'matrix_f': '../models/ALaCarte/transform/wiki_all_transform.bin',
                        'data':'./eval_data/emerging_entities/',
                        'train_or_test':'test',
-                       'model_type':SKIPGRAM,
+                       'model_type':CONTEXT2VEC_SUB,
                        'output_dir':'./results/ner/',
-                       #    'batchsize':10,
-                       #    'lr':0.01,
-                       #    'epochs':200,
-                       #    'save_every_n':5,
-                          'model_path':'./results/ner/train_alacarte_wiki_all.sent.split.model.h5_epoch10_loss1.33000946045'
+                          'batchsize':10,
+                          'lr':0.01,
+                          'epochs':200,
+                          'save_every_n':5,
+                          'model_path':'./results/ner/train_context2vec-skipgram_MODEL-wiki.params.14_wiki_all.sent.split.model.h5_epoch35_loss1.20299649239'
                        })
 
 
@@ -322,12 +359,14 @@ if __name__ == "__main__":
         dev_data_embed_fname=write_embedding_tofile(args,'dev')
         print ('train...')
         # train
-        train(embedding_train_fname=train_data_embed_fname,embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=100)
+        train(embedding_train_fname=train_data_embed_fname,embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=Hidden_unit)
         # validation
     # read embeddings and test
     elif args.train_or_test=='test':
-        test_data_fname=write_embedding_tofile(args,'test')
-        # test(args.model_path)
+        test_data_embed_fname=write_embedding_tofile(args,'test')
+        y_pred=test(path=args.model_path,test_data_embed_fname=test_data_embed_fname,H=Hidden_unit,labels2y=LABELS2Y)
+        pred_conll=test_output(y_pred=y_pred,args=args,LABELS=LABELS)
+        output_conll_to_file(pred_conll,output_fname=test_data_embed_fname+'.output')
         #test
         pass
 
