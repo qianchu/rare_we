@@ -7,6 +7,7 @@ from nltk.corpus import stopwords
 import math
 from math import sqrt
 
+
 import argparse
 import sys
 import numpy as np
@@ -15,6 +16,8 @@ from context2vec.common.model_reader import ModelReader
 import gensim
 import unittest
 from gensim.models import KeyedVectors
+from allennlp.modules.elmo import Elmo, batch_to_ids
+
 
 
 # define models
@@ -27,6 +30,8 @@ CONTEXT2VEC_SUB__SKIPGRAM=CONTEXT2VEC_SUB+'__'+SKIPGRAM
 CONTEXT2VEC_SUB__SKIPGRAM_ISF=CONTEXT2VEC_SUB+'__'+SKIPGRAM_ISF
 DTYPE = 'float64'
 ALACARTE_FLOAT = np.float32
+ELMO='elmo'
+CONTEXT2VEC_SUB_ELMO='context2vec-elmo'
 
 stopw = stopwords.words('english')
 stopw = [word.encode('utf-8') for word in stopw]
@@ -42,14 +47,18 @@ def remove_stopword(word):
     
 
 # general related functions
-def load_model_fromfile(context2vec_param_file,skipgram_param_file,gpu):
+def load_model_fromfile(context2vec_param_file,skipgram_param_file,elmo_param_file,gpu):
     context2vec_modelreader_out=None
     model_skipgram_out=None
     if type(context2vec_param_file) == str:
         context2vec_modelreader_out = ModelReader(context2vec_param_file, gpu)
     if type(skipgram_param_file) == str:
         model_skipgram_out = read_skipgram(skipgram_param_file)
-    return context2vec_modelreader_out,model_skipgram_out
+    if type(elmo_param_file) == list:
+        options_file =elmo_param_file[0]
+        weight_file = elmo_param_file[1]
+        elmo = Elmo(options_file, weight_file, 1, dropout=0)
+    return context2vec_modelreader_out,model_skipgram_out,elmo
 
 
 def read_skipgram(model_param_file):
@@ -113,22 +122,21 @@ def load_transform(Afile,model_dimension):
         with open(Afile, 'r') as f:
             return np.vstack([np.array([ALACARTE_FLOAT(x) for x in line.split()]) for line in f])
 
-
 # main class
 
 class ContextModel():
-    def __init__(self, model_type, gpu=-1, context2vec_modelreader=None,skipgram_model=None, n_result=20, ws_f=None,matrix_f=None):
+    def __init__(self, model_type, gpu=-1, context2vec_modelreader=None,skipgram_model=None, elmo_model=None,n_result=20, ws_f=None,matrix_f=None):
         self.gpu=-1 if gpu is None else gpu
         self.xp = cuda.cupy if self.gpu >= 0 else np
 
         self.model_type=model_type
         self.n_result=20 if n_result is None else n_result
         
-        self.load_model(context2vec_modelreader,skipgram_model)
+        self.load_model(context2vec_modelreader,skipgram_model,elmo_model)
         self.word_weight=load_w2salience(self.model_skipgram,ws_f) if ws_f is not None else None
         self.alacarte_m=self.xp.array(load_transform(matrix_f,self.model_dimension)) if matrix_f is not None else None
 
-    def load_model(self, context2vec_modelreader,skipgram_model):
+    def load_model(self, context2vec_modelreader,skipgram_model,elmo_model):
         if context2vec_modelreader is not None:
             self.context2vec_w,self.context2vec_index2word,self.context2vec_word2index,self.context2vec_model=read_context2vec(context2vec_modelreader)
             self.context2vec_w=self.xp.array(self.context2vec_w)
@@ -137,17 +145,25 @@ class ContextModel():
             self.model_skipgram=skipgram_model
             self.model_skipgram_word2index = {key: self.model_skipgram.wv.vocab[key].index for key in self.model_skipgram.wv.vocab}
             self.model_dimension=self.model_skipgram.wv.vectors[0].shape[0]
+        if elmo_model is not None:
+            #To do elmo vocav
+            self.model_elmo=elmo_model
+            self.model_dimension=self.model_elmo.get_output_dim()
      
     def compute_context_rep(self,test_s,test_w,model):
         words,pos=process_sent(test_s,test_w)
         if model==CONTEXT2VEC:
             context_rep= self.context2vec_model.context2vec(words, pos)
+        if model==ELMO:
+            context_rep=self.elmo_context_batch([words],[pos],[''])[0]
         elif model==CONTEXT2VEC_SUB:
             context_rep=self.context2vec_sub(words,pos)
         elif model==SKIPGRAM or model==SKIPGRAM_ISF:
             context_rep=self.skipgram_context(model,words, pos)
         elif model==A_LA_CARTE:
             context_rep=self.skipgram_context(model,words=words, pos=pos,stopw_rm=False)
+        elif model==CONTEXT2VEC_SUB_ELMO:
+            context_rep=self.context2vec_sub_elmo(words,pos)
         else:
             print ('WARNING: incorrect model type{0}'.format(model))
         return context_rep
@@ -188,6 +204,16 @@ class ContextModel():
             context_out=context_sum/len(contexts_out)
         return context_out
 
+
+    def elmo_context_batch(self,words_lsts,pos_lst,replace_w_lst):
+
+        for i  in range(len(words_lsts)):
+             words_lsts[i][pos_lst[i]]=replace_w_lst[i]
+        character_ids = batch_to_ids(words_lsts)
+        context_reps = [tensor.detach().numpy()[0][pos_lst[i]] for i,tensor in enumerate(self.model_elmo(character_ids)['elmo_representations'])]
+        return context_reps
+
+
     def skipgram_context(self,model,words,pos,stopw_rm=True):
         context_wvs=[]
         weights=[]
@@ -210,7 +236,15 @@ class ContextModel():
             return None
         return sum(weights),context_embed
 
-    
+
+    def context2vec_sub_elmo(self,words,pos):
+        context_rep=self.context2vec_model.context2vec(words, pos)
+        top_vec,sim_scores,top_words=self.produce_top_n_simwords(self.context2vec_w,context_rep, self.context2vec_index2word, debug=False)
+        contexts_sub,pos_lst,replace_w_lst=zip(*[(words, pos, top_words[i]) for i in range(len(top_words))])
+        elmo_sub=self.elmo_context_batch(words_lsts=contexts_sub,pos_lst=pos_lst,replace_w_lst=replace_w_lst)
+        elmo_sub_weighted_avg=self.xp.array(sum(elmo_sub*((sim_scores/sum(sim_scores)).reshape(len(sim_scores),1))))
+        return elmo_sub_weighted_avg
+
     def context2vec_sub(self,words,pos):
         context_rep=self.context2vec_model.context2vec(words, pos)
         top_vec,sim_scores,top_words=self.produce_top_n_simwords(self.context2vec_w,context_rep, self.context2vec_index2word, debug=False)
@@ -269,24 +303,24 @@ class ContextModel():
 
 
 # read in parameters and setup
-class ArgTest:
-    def __init__(self,model_type=None,gpu=-1,context2vec_param_file=None, skipgram_param_file=None, n_result=None,w2salience_f=None,matrix_f=None,data=None):
-        self.context2vec_param_file=context2vec_param_file
-        self.skipgram_param_file=skipgram_param_file
-        self.model_type=model_type
-        self.n_result=n_result
-        self.gpu=gpu
-        self.w2salience_f=w2salience_f
-        self.matrix_f=matrix_f
-        self.data=data
-    
+class ArgTest(dict):
+    def __init__(self, *args):
+            super(ArgTest, self).__init__(*args)
+            self.__dict__ = self
+
+    def __getattr__(self, attr):
+        if attr not in self:
+            return None
+        else:
+            return self[attr]
+
 
 def parse_args(test_files):
 
     if len(sys.argv)==1:
         print ('missing arguments..')
         print ('load test')
-        args=ArgTest(context2vec_param_file=test_files['context2vec_param_file'], skipgram_param_file=test_files['skipgram_param_file'],w2salience_f=test_files['ws_f'],matrix_f=test_files['matrix_f'])
+        args=ArgTest(test_files)
     else:
         parser = argparse.ArgumentParser(description='Evaluate on long tail emerging ner')
         parser.add_argument('--cm',  type=str,
@@ -299,8 +333,10 @@ def parse_args(test_files):
         parser.add_argument('--ws', dest='w2salience_f',type=str, default=None,help='word2salience file, optional')
         parser.add_argument('--n_result',default=20,dest='n_result',type=int,help='top n result for language model substitutes')
         parser.add_argument('--ma', dest='matrix_f',type=str,default=None,help='matrix file for a la carte')
+        parser.add_argument('--elmo',type=str, default=None, dest='elmo filename',nargs='+',help='elmo_param_file')
+
         args = parser.parse_args()
-        print args
+        print (args)
 
     return args  
 
@@ -399,14 +435,21 @@ class TestCases2(unittest.TestCase):
                                                          test_w='___')
         self.assertSequenceEqual(xp.array(context_final[:10],dtype=DTYPE).tolist(),xp.array([-0.26741879756799725, 0.1904742187106585, -0.20207293493171546, -0.035881038638455404, 0.031569901468545686, -0.02004283636814247, 0.04682512920053014, -0.6029695352643941, 0.24818600094342189, 0.18152202352953248],dtype=DTYPE).tolist())
 
+    def test_elmo(self):
+        CM = ContextModel(model_type=ELMO,elmo_model=elmo_model)
+
 
 if __name__=='__main__':
     print(sys.argv)
     args = parse_args(test_files=
-        {'context2vec_param_file':'../models/context2vec/model_dir/MODEL-wiki.params.14',
-         'skipgram_param_file':'../models/wiki_all.model/wiki_all.sent.split.model',
-         'ws_f':'../corpora/corpora/WWC_norarew.txt.tokenized.vocab',
-         'matrix_f':'../models/ALaCarte/transform/wiki_all_transform.bin'
+        {
+            'context2vec_param_file':'../models/context2vec/model_dir/MODEL-wiki.params.14',
+         # 'skipgram_param_file':'../models/wiki_all.model/wiki_all.sent.split.model',
+         'elmo_param_file':["https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json","https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"],
+
+         # 'ws_f':'../corpora/corpora/WWC_norarew.txt.tokenized.vocab',
+         # 'matrix_f':'../models/ALaCarte/transform/wiki_all_transform.bin'
+            'gpu':-1
          })
     #gpu setup
 
@@ -415,9 +458,8 @@ if __name__=='__main__':
 
 
     #read in model
-    context2vec_modelreader, model_skipgram = load_model_fromfile(
-        skipgram_param_file=args.skipgram_param_file,
-        context2vec_param_file=args.context2vec_param_file, gpu=args.gpu)
+    context2vec_modelreader, model_skipgram, elmo_model = load_model_fromfile(skipgram_param_file=args.skipgram_param_file,context2vec_param_file=args.context2vec_param_file, elmo_param_file=args.elmo_param_file,gpu=args.gpu)
+    CM = ContextModel(model_type=CONTEXT2VEC_SUB_ELMO, elmo_model=elmo_model,context2vec_modelreader=context2vec_modelreader,gpu=args.gpu)
 
-    unittest.main(argv=['first-arg-is-ignored'], exit=False)
+    # unittest.main(argv=['first-arg-is-ignored'], exit=False)
 

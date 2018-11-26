@@ -1,13 +1,14 @@
 __author__ = 'qianchu_liu'
 
 
-from Context_represent import *
+
+from eval.Context_represent import *
 from nltk.corpus.reader.conll import ConllCorpusReader
 from copy import deepcopy
 import os
 import h5py
 import torch
-import torch.nn.functional as F
+
 
 
 TARGET_W='___'
@@ -43,8 +44,8 @@ def from_label_to_y(labels):
         label2y[label]=y
     return label2y
 def convert_to_masked_wordlist(tagged_sent,tags_position):
-    words_lst=list(zip(*tagged_sent)[0])
-    tags_lst=list(zip(*tagged_sent)[1])
+    words_lst=list(list(zip(*tagged_sent))[0])
+    tags_lst=list(list(zip(*tagged_sent))[1])
     for tag_position in tags_position:
         word_lst_masked=deepcopy(words_lst)
         word_lst_masked[tag_position[0]:tag_position[1]]='_'
@@ -123,11 +124,11 @@ def write_embedding_tofile(args,part) :
     if not embedding_file_exist:
         data_label_generator = load_ner_data_label(root=args.data, filename=PARTITION[part],
                                                    batchsize=args.batchsize)
-        context2vec_modelreader, model_skipgram = load_model_fromfile(
+        context2vec_modelreader, model_skipgram,model_elmo = load_model_fromfile(
             skipgram_param_file=args.skipgram_param_file,
-            context2vec_param_file=args.context2vec_param_file, gpu=args.gpu)
+            context2vec_param_file=args.context2vec_param_file, elmo_param_file=args.elmo_param_file,gpu=args.gpu)
         CM = ContextModel(model_type=args.model_type, context2vec_modelreader=context2vec_modelreader,
-                          skipgram_model=model_skipgram, n_result=args.n_result, ws_f=args.w2salience_f,
+                          skipgram_model=model_skipgram, elmo_model=model_elmo,n_result=args.n_result, ws_f=args.w2salience_f,
                           matrix_f=args.matrix_f)
         hf = h5py.File(embedding_fname,'w')
         for chunk in compute_rep_chunk(data_label_generator, CM):
@@ -155,6 +156,7 @@ def parse_args_ner(test_files):
         print ('load test')
         args=ArgTestNer(test_files)
 
+
     else:
         parser = argparse.ArgumentParser(description='Evaluate on long tail emerging ner')
         parser.add_argument('--cm', type=str,
@@ -172,12 +174,12 @@ def parse_args_ner(test_files):
         parser.add_argument('--output_dir', dest='output_dir', type=str,help='output dir for embedding file and learned model')
         parser.add_argument('--batchsize', dest='batchsize', type=int,help='batchsize',default=100)
         parser.add_argument('--lr',dest='lr',type=float,help='learning rate', default=1e-4)
-        parser.add_argument('--ep',dest='epochs',type=float,help='epochs', default=10)
+        parser.add_argument('--ep',dest='epochs',type=int,help='epochs', default=10)
         parser.add_argument('--n',dest='save_every_n',type=int,help='save every n epochs', default=5)
         parser.add_argument('--path',dest='model_path',type=str,help='mlp model path')
 
         args = parser.parse_args()
-        print args
+        print (args)
 
     return args
 
@@ -197,15 +199,26 @@ def generate_embed_labels_batch(args,embed_data,batchsize,labels2y,train_or_test
     for start in range(0,l,batchsize):
         yield embed_data[start:min(start+batchsize,l)], next(data_label_generator)[1]
 
-def validate_per_epoch(embed_dev,args,criterion,labels2y,model):
-
+def accuracy(y_pred,y_gold):
+    accurate_items=[i for i in range(len(y_pred)) if y_pred[i]==y_gold[i]]
+    return len(accurate_items)
+def validate_per_epoch(embed_dev,args,criterion,labels2y,model,part):
+    accur=0
     loss_dev=0
-    for data_batch,y in generate_embed_labels_batch(args, embed_dev,len(embed_dev), labels2y,'dev'):
-        y_pred_dev = model(torch.tensor(data_batch).float())
+    for data_batch,y in generate_embed_labels_batch(args, embed_dev,len(embed_dev), labels2y,part):
+        # y_pred_dev = model(torch.tensor(data_batch).float())
+        #
+        # y = torch.max(torch.tensor(y), 1)[1]
+        # loss_dev_per_batch = criterion(y_pred_dev, y)
+        # loss_dev+=loss_dev_per_batch.item()
+
+        y_pred_dev=model(torch.tensor(data_batch).float())
+        y_pred_dev_argmax = torch.max(y_pred_dev,1)[1]
         y = torch.max(torch.tensor(y), 1)[1]
+        accur+=accuracy(y_pred_dev_argmax, y)
         loss_dev_per_batch = criterion(y_pred_dev, y)
         loss_dev+=loss_dev_per_batch.item()
-    return loss_dev
+    return accur,loss_dev
 
 def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H):
     # dtype = torch.float
@@ -222,7 +235,7 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H):
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
     for t in range(args.epochs):
         loss_per_epoch=0
-        for data_batch,y in generate_embed_labels_batch(args,embed_train,args.batchsize,labels2y,'train'):
+        for data_batch,y in generate_embed_labels_batch(args,embed_train,args.batchsize,labels2y,os.path.basename(embedding_train_fname).split('_')[0]):
 
             # Forward pass: Compute predicted y by passing x to the model
             y_pred = model(torch.tensor(data_batch).float())
@@ -236,19 +249,20 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H):
             optimizer.step()
             # break
         print ('training loss per epoch: {0},epoch {1}'.format(loss_per_epoch,t))
-        loss_dev=validate_per_epoch(embed_dev=embed_dev,args=args,criterion=criterion,labels2y=labels2y,model=model)
-        print ('dev loss per epoch: {0}'.format(loss_dev))
+        accur_dev,loss_dev=validate_per_epoch(embed_dev=embed_dev,args=args,criterion=criterion,labels2y=labels2y,model=model,part=os.path.basename(embedding_dev_fname).split('_')[0])
+
+        print ('dev accuracy per epoch: {0}, loss is {1}'.format(accur_dev,loss_dev))
 
         if t%args.save_every_n==0 and t>=args.save_every_n:
-            torch.save(model.state_dict(), embedding_train_fname+'_epoch{0}_loss{1}'.format(t,loss_dev))
+            torch.save(model.state_dict(), embedding_train_fname+'_epoch{0}_accur{1}_loss{2}'.format(t,accur_dev,loss_dev))
 
     train_file.close()
     dev_file.close()
 
-def test_output(y_pred,args,LABELS):
+def test_output(y_pred,args,LABELS,data_fname):
     CCR = ConllCorpusReader(root=args.data, fileids='.conll',
                             columntypes=('words', 'pos', 'ne', 'chunk'))
-    tagged_sents=CCR.tagged_sents(PARTITION['test'])
+    tagged_sents=CCR.tagged_sents(data_fname)
     pred_conll=[]
     counter=0
     for tagged_sent in tagged_sents:
@@ -279,9 +293,11 @@ def test(path,test_data_embed_fname,H,labels2y):
     model.load_state_dict(torch.load(path))
     model.eval()
 
-    for data_batch, y in generate_embed_labels_batch(args, embed_test, len(embed_test), labels2y, 'test'):
+    for data_batch, y in generate_embed_labels_batch(args, embed_test, len(embed_test), labels2y, os.path.basename(test_data_embed_fname).split('_')[0]):
         # Forward pass: Compute predicted y by passing x to the model
         y_pred = torch.max(model(torch.tensor(data_batch).float()),1)[1]
+        y = torch.max(torch.tensor(y), 1)[1]
+        print ('accuracy is',accuracy(y_pred,y))
 
     test_file.close()
     return y_pred
@@ -316,24 +332,30 @@ if __name__ == "__main__":
     PARTITION = {'train': 'wnut17train.conll', 'test': 'emerging.test.annotated', 'dev': 'emerging.dev.conll'}
     LABELS2Y=from_label_to_y(LABELS)
     start_time = time.time()
-    Hidden_unit=100
+    Hidden_unit=200
 
     # 1. load args
     args = parse_args_ner(test_files=
                       {
                           'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
-                       'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
-                       # 'ws_f': '../corpora/corpora/WWC_norarew.txt.tokenized.vocab',
+                       # 'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
+                       # 'w2salience_f': '../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab',
                        # 'matrix_f': '../models/ALaCarte/transform/wiki_all_transform.bin',
-                       'data':'./eval_data/emerging_entities/',
-                       'train_or_test':'test',
-                       'model_type':CONTEXT2VEC_SUB,
+                          'elmo_param_file': [
+                              "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json",
+                              "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"],
+
+                          'data':'./eval_data/emerging_entities/',
+                       'train_or_test':'train',
+                       'model_type':CONTEXT2VEC_SUB_ELMO,
                        'output_dir':'./results/ner/',
-                          'batchsize':10,
-                          'lr':0.01,
-                          'epochs':200,
-                          'save_every_n':5,
-                          'model_path':'./results/ner/train_context2vec-skipgram_MODEL-wiki.params.14_wiki_all.sent.split.model.h5_epoch35_loss1.20299649239'
+                          'batchsize':100,
+                          'lr':0.001,
+                          'epochs':1000,
+                          'save_every_n':2000,
+                          'gpu':-1,
+                          'n_result':20,
+                          'model_path':'./results/ner/train_skipgram_isf_wiki_all.sent.split.model.h5_epoch80_accur422_loss1.65266299248'
                        })
 
 
@@ -356,7 +378,7 @@ if __name__ == "__main__":
     if args.train_or_test=='train':
         print ('load data>>')
         train_data_embed_fname=write_embedding_tofile(args,'train')
-        dev_data_embed_fname=write_embedding_tofile(args,'dev')
+        dev_data_embed_fname=write_embedding_tofile(args,'test')
         print ('train...')
         # train
         train(embedding_train_fname=train_data_embed_fname,embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=Hidden_unit)
@@ -365,7 +387,7 @@ if __name__ == "__main__":
     elif args.train_or_test=='test':
         test_data_embed_fname=write_embedding_tofile(args,'test')
         y_pred=test(path=args.model_path,test_data_embed_fname=test_data_embed_fname,H=Hidden_unit,labels2y=LABELS2Y)
-        pred_conll=test_output(y_pred=y_pred,args=args,LABELS=LABELS)
+        pred_conll=test_output(y_pred=y_pred,args=args,LABELS=LABELS,data_fname=PARTITION['test'])
         output_conll_to_file(pred_conll,output_fname=test_data_embed_fname+'.output')
         #test
         pass
