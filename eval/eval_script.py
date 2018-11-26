@@ -402,7 +402,7 @@ def update_mrr(nns,nonce,mrr,ranks):
 
     if rr != 0:
         mrr+=float(1)/float(rr)	
-    print rr,mrr
+    print (rr,mrr)
     return mrr,ranks
 
 def similar_by_vector(w,model_w2v, index2word,context_avg):
