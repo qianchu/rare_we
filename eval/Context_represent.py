@@ -17,8 +17,7 @@ import gensim
 import unittest
 from gensim.models import KeyedVectors
 from allennlp.modules.elmo import Elmo, batch_to_ids
-
-
+from functools import lru_cache
 
 # define models
 CONTEXT2VEC='context2vec'
@@ -44,14 +43,30 @@ def remove_stopword(word):
         return word
     else:
         return None
-    
+
+def memoize(func):
+    cache = dict()
+
+    def memoized_func(*args):
+        if args in cache:
+            return cache[args]
+        result = func(*args)
+        cache[args] = result
+        return result
+
+    return memoized_func
 
 # general related functions
+@lru_cache(maxsize=10000)
+def read_context2vec_model(context2vec_param_file, gpu):
+    model=ModelReader(context2vec_param_file, gpu)
+    return model
+
 def load_model_fromfile(context2vec_param_file,skipgram_param_file,elmo_param_file,gpu):
     context2vec_modelreader_out=None
     model_skipgram_out=None
     if type(context2vec_param_file) == str:
-        context2vec_modelreader_out = ModelReader(context2vec_param_file, gpu)
+        context2vec_modelreader_out = read_context2vec_model(context2vec_param_file, gpu)
     if type(skipgram_param_file) == str:
         model_skipgram_out = read_skipgram(skipgram_param_file)
     if type(elmo_param_file) == list:
@@ -210,7 +225,7 @@ class ContextModel():
         for i  in range(len(words_lsts)):
              words_lsts[i][pos_lst[i]]=replace_w_lst[i]
         character_ids = batch_to_ids(words_lsts)
-        context_reps = [tensor.detach().numpy()[0][pos_lst[i]] for i,tensor in enumerate(self.model_elmo(character_ids)['elmo_representations'])]
+        context_reps = [context_per_sentence[pos_lst[i]] for i,context_per_sentence in enumerate(self.model_elmo(character_ids)['elmo_representations'][0].detach().numpy())]
         return context_reps
 
 
@@ -437,7 +452,8 @@ class TestCases2(unittest.TestCase):
 
     def test_elmo(self):
         CM = ContextModel(model_type=ELMO,elmo_model=elmo_model)
-
+        CM.elmo_context_batch([['i', 'do'], ['i', 'hate','you']], [0, 1], ['unk', 'unk'])
+        CM.context2vec_sub_elmo(['i', 'hate','you'], 1)
 
 if __name__=='__main__':
     print(sys.argv)
@@ -458,6 +474,7 @@ if __name__=='__main__':
 
 
     #read in model
+
     context2vec_modelreader, model_skipgram, elmo_model = load_model_fromfile(skipgram_param_file=args.skipgram_param_file,context2vec_param_file=args.context2vec_param_file, elmo_param_file=args.elmo_param_file,gpu=args.gpu)
     CM = ContextModel(model_type=CONTEXT2VEC_SUB_ELMO, elmo_model=elmo_model,context2vec_modelreader=context2vec_modelreader,gpu=args.gpu)
 
