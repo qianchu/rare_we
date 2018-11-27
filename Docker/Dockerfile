@@ -5,6 +5,7 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 ENV PATH /opt/conda/bin:$PATH
 
 RUN apt-get update --fix-missing && \
+    apt install build-essential && \
     apt-get install -y wget bzip2 ca-certificates curl git vim bzip2 bash sudo && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
