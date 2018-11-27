@@ -26,7 +26,6 @@ dependencies:
   - jpeg=9b
   - libedit=3.1.20170329
   - libffi=3.2.1
-  - libgfortran=3.0.1
   - libpng=1.6.35
   - libprotobuf=3.6.1
   - libtiff=4.0.9
