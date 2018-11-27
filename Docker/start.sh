@@ -6,6 +6,7 @@ ENV_NAME="rare_we_clean"
 if conda env list | grep -q $ENV_NAME
 then
     echo $ENV_NAME found
+    conda env update -f environment_$ENV_NAME.yml
 else
     echo "new environemnt"$ENV_NAME
     conda env create -f environment_$ENV_NAME.yml
