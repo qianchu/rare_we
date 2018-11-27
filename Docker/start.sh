@@ -2,7 +2,7 @@
 
 
 #environment config
-ENV_NAME="rare_we_py3"
+ENV_NAME="rare_we_clean"
 if conda env list | grep -q $ENV_NAME
 then
     echo $ENV_NAME found
@@ -19,5 +19,5 @@ git config --global user.email "hey_flora@126.com"
 git config --global user.name "qianchu"
 
 ## pack python project
-#cd ./models/context2vec
-#python ./setup.py install
+cd ../models/context2vec
+python ./setup.py install

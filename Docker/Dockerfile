@@ -23,7 +23,7 @@ ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /usr/
 RUN chmod +x /usr/bin/tini
 
 ADD start.sh /home/start.sh
-ADD environment_rare_we_py3.yml /home/environment_rare_we_py3.yml
+ADD environment_rare_we_clean.yml /home/environment_rare_we_clean.yml
 RUN chmod +x /home/start.sh
 
 RUN useradd -m ql261 && echo "ql261:ql261" | chpasswd && adduser ql261 sudo && echo "root:ql261" | chpasswd
