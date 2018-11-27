@@ -26,4 +26,4 @@ python ./setup.py install
 cd ../../
 rare_we_dir=$(pwd)
 echo $rare_we_dir
-export PYTHONPATH="${PYTHONPATH}:$rare_we_dir" >> $HOME/.bashrc
+export PYTHONPATH="$rare_we_dir" >> $HOME/.bashrc
