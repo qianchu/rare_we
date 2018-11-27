@@ -18,6 +18,7 @@ import unittest
 from gensim.models import KeyedVectors
 from allennlp.modules.elmo import Elmo, batch_to_ids
 from functools import lru_cache
+from copy import deepcopy
 
 # define models
 CONTEXT2VEC='context2vec'
@@ -255,9 +256,9 @@ class ContextModel():
     def context2vec_sub_elmo(self,words,pos):
         context_rep=self.context2vec_model.context2vec(words, pos)
         top_vec,sim_scores,top_words=self.produce_top_n_simwords(self.context2vec_w,context_rep, self.context2vec_index2word, debug=False)
-        contexts_sub,pos_lst,replace_w_lst=zip(*[(words, pos, top_words[i]) for i in range(len(top_words))])
+        contexts_sub,pos_lst,replace_w_lst=zip(*[(deepcopy(words), pos, top_words[i]) for i in range(len(top_words))])
         elmo_sub=self.elmo_context_batch(words_lsts=contexts_sub,pos_lst=pos_lst,replace_w_lst=replace_w_lst)
-        elmo_sub_weighted_avg=self.xp.array(sum(elmo_sub*((sim_scores/sum(sim_scores)).reshape(len(sim_scores),1))))
+        elmo_sub_weighted_avg=self.xp.array(sum(elmo_sub*((sim_scores/sum(sim_scores)).reshape(len(sim_scores),1))),dtype=elmo_sub[0].dtype)
         return elmo_sub_weighted_avg
 
     def context2vec_sub(self,words,pos):
@@ -477,6 +478,7 @@ if __name__=='__main__':
 
     context2vec_modelreader, model_skipgram, elmo_model = load_model_fromfile(skipgram_param_file=args.skipgram_param_file,context2vec_param_file=args.context2vec_param_file, elmo_param_file=args.elmo_param_file,gpu=args.gpu)
     CM = ContextModel(model_type=CONTEXT2VEC_SUB_ELMO, elmo_model=elmo_model,context2vec_modelreader=context2vec_modelreader,gpu=args.gpu)
+    CM.context2vec_sub_elmo(['i', 'hate', 'you'], 1)
 
     # unittest.main(argv=['first-arg-is-ignored'], exit=False)
 
