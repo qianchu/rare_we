@@ -13,17 +13,19 @@ else
 fi
 
 source activate $ENV_NAME
-#conda env export --no-builds > environment_$ENV_NAME.yml
 
 #git config
 git config --global user.email "hey_flora@126.com"
 git config --global user.name "qianchu"
 
-## pack python project
+## pack python project and setup pythonpath
 cd ../models/context2vec
 python ./setup.py install
 
 cd ../../
-rare_we_dir=$(pwd)
+rare_we_dir="$(pwd | sed 's/ /\\ /g')"
 echo $rare_we_dir
-export PYTHONPATH="$rare_we_dir" >> $HOME/.bashrc
+
+if [ -z "${PYTHONPATH}" ]; then echo export PYTHONPATH="$rare_we_dir" >> $HOME/.bashrc; else echo "pythonpath found"; fi
+
+bash
