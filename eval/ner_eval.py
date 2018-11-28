@@ -8,6 +8,7 @@ from copy import deepcopy
 import os
 import h5py
 import torch
+import os
 
 
 
@@ -178,6 +179,8 @@ def parse_args_ner(test_files):
         parser.add_argument('--lr',dest='lr',type=float,help='learning rate', default=1e-4)
         parser.add_argument('--ep',dest='epochs',type=int,help='epochs', default=10)
         parser.add_argument('--n',dest='save_every_n',type=int,help='save every n epochs', default=5)
+        parser.add_argument('--run',dest='n_runs',type=int,help='number of runs of the MLP', default=5)
+
         parser.add_argument('--path',dest='model_path',type=str,help='mlp model path')
 
         args = parser.parse_args()
@@ -222,7 +225,8 @@ def validate_per_epoch(embed_dev,args,criterion,labels2y,model,part):
         loss_dev+=loss_dev_per_batch.item()
     return accur,loss_dev
 
-def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H):
+
+def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs):
     # dtype = torch.float
 
     train_file=h5py.File(embedding_train_fname,'r')
@@ -231,32 +235,42 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H):
     embed_dev = dev_file['data']
 
     D_in, D_out = embed_train[0].shape[0], len(labels2y)
-    model=TwoLayerNet(D_in,H,D_out)
-    criterion = torch.nn.CrossEntropyLoss()
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
-    for t in range(args.epochs):
-        loss_per_epoch=0
-        for data_batch,y in generate_embed_labels_batch(args,embed_train,args.batchsize,labels2y,os.path.basename(embedding_train_fname).split('_')[0]):
+    for run in runs:
+        model=TwoLayerNet(D_in,H,D_out)
+        criterion = torch.nn.CrossEntropyLoss()
 
-            # Forward pass: Compute predicted y by passing x to the model
-            y_pred = model(torch.tensor(data_batch).float())
-            # Compute and print loss
-            y=torch.max(torch.tensor(y),1)[1]
-            loss=criterion(y_pred,y)
-            loss_per_epoch+=loss.item()
-            # Zero gradients, perform a backward pass, and update the weights.
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            # break
-        print ('training loss per epoch: {0},epoch {1}'.format(loss_per_epoch,t))
-        accur_dev,loss_dev=validate_per_epoch(embed_dev=embed_dev,args=args,criterion=criterion,labels2y=labels2y,model=model,part=os.path.basename(embedding_dev_fname).split('_')[0])
+        accur_dev_best=0
+        loss_dev_best=math.inf
+        epoch_best=0
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
+        for t in range(args.epochs):
+            loss_per_epoch=0
+            for data_batch,y in generate_embed_labels_batch(args,embed_train,args.batchsize,labels2y,os.path.basename(embedding_train_fname).split('_')[0]):
 
-        print ('dev accuracy per epoch: {0}, loss is {1}'.format(accur_dev,loss_dev))
+                # Forward pass: Compute predicted y by passing x to the model
+                y_pred = model(torch.tensor(data_batch).float())
+                # Compute and print loss
+                y=torch.max(torch.tensor(y),1)[1]
+                loss=criterion(y_pred,y)
+                loss_per_epoch+=loss.item()
+                # Zero gradients, perform a backward pass, and update the weights.
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                # break
+            print ('training loss per epoch: {0},epoch {1}'.format(loss_per_epoch,t))
+            accur_dev,loss_dev=validate_per_epoch(embed_dev=embed_dev,args=args,criterion=criterion,labels2y=labels2y,model=model,part=os.path.basename(embedding_dev_fname).split('_')[0])
 
-        if t%args.save_every_n==0 and t>=args.save_every_n:
-            torch.save(model.state_dict(), embedding_train_fname+'_epoch{0}_accur{1}_loss{2}'.format(t,accur_dev,loss_dev))
+            print ('dev accuracy per epoch: {0}, loss is {1}'.format(accur_dev,loss_dev))
+
+            if t%args.save_every_n==0 and t>=args.save_every_n:
+                if accur_dev>accur_dev_best and loss_dev<loss_dev_best:
+                    torch.save(model.state_dict(), embedding_train_fname+'_run{3}_epoch{0}_accur{1}_loss{2}'.format(t,accur_dev,loss_dev,run))
+                    if epoch_best>0:
+                        os.remove(embedding_train_fname+'_run{3}_epoch{0}_accur{1}_loss{2}'.format(epoch_best,accur_dev_best,loss_dev_best,run))
+                    epoch_best,accur_dev_best,loss_dev_best=t,accur_dev,loss_dev
+
 
     train_file.close()
     dev_file.close()
@@ -355,10 +369,11 @@ if __name__ == "__main__":
                           'batchsize':100,
                           'lr':0.001,
                           'epochs':1000,
+                          'n_runs':5,
                           'save_every_n':20,
                           'gpu':-1,
                           'n_result':20,
-                          'model_path':'./results/ner/train_elmo.h5_epoch420_accur454_loss1.1992757320404053'
+                          'model_path':'./results/ner/train_context2vec-elmo_MODEL-wiki.params.14.h5_epoch780_accur466_loss1.1372770071029663'
                        })
 
 
@@ -379,7 +394,7 @@ if __name__ == "__main__":
         dev_data_embed_fname=write_embedding_tofile(args,'dev')
         print ('train...')
         # train
-        train(embedding_train_fname=train_data_embed_fname,embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=Hidden_unit)
+        train(embedding_train_fname=train_data_embed_fname,embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=Hidden_unit,runs=args.n_runs)
         # validation
     # read embeddings and test
     elif args.train_or_test=='test':

@@ -28,6 +28,7 @@ from __future__ import print_function
 from collections import defaultdict, namedtuple
 import fileinput
 import sys
+from functools import reduce
 
 
 def get_sents(lines):
