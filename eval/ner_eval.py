@@ -49,39 +49,43 @@ def convert_to_masked_wordlist(tagged_sent,tags_position):
     tags_lst=list(list(zip(*tagged_sent))[1])
     for tag_position in tags_position:
         word_lst_masked=deepcopy(words_lst)
+        targetw=''.join(word_lst_masked[tag_position[0]:tag_position[1]])
         word_lst_masked[tag_position[0]:tag_position[1]]='_'
-        word_lst_masked[tag_position[0]] = TARGET_W
+        word_lst_masked[tag_position[0]] = targetw
         tag=tags_lst[tag_position[0]][2:]
-        yield word_lst_masked,tag
+        yield word_lst_masked,tag_position[0],tag
 
 
 def process_sent(tagged_sent):
     tags_position=return_tag_position(tagged_sent)
-    for masked_wordlist,tag in convert_to_masked_wordlist(tagged_sent,tags_position):
-        yield masked_wordlist,tag
+    for masked_wordlist,pos,tag in convert_to_masked_wordlist(tagged_sent,tags_position):
+        yield masked_wordlist,pos,tag
 
 
 def process_tagged_sents(tagged_sents,batchsize,labels2y):
     masked_word_lsts=[]
     tags=[]
+    pos_lst=[]
     for tagged_sent in tagged_sents:
-        for masked_word_lst,tag in process_sent(tagged_sent):
+        for masked_word_lst,pos,tag in process_sent(tagged_sent):
             masked_word_lsts.append(masked_word_lst)
+            pos_lst.append(pos)
             tags.append(labels2y[tag]) if labels2y is not None else tags.append(tag)
             if len(tags)>=batchsize:
-                yield masked_word_lsts,tags
+                yield masked_word_lsts,pos_lst,tags
                 masked_word_lsts = []
                 tags = []
+                pos_lst=[]
 
     if len(tags)>0:
-        yield masked_word_lsts,tags
+        yield masked_word_lsts,pos_lst,tags
 
 
 def load_ner_data_label(root,filename,batchsize,labels2y=None):
     CCR = ConllCorpusReader(root=root, fileids='.conll',
                             columntypes=('words', 'pos', 'ne', 'chunk'))
-    for masked_word_lsts, tags in process_tagged_sents(CCR.tagged_sents(filename),batchsize,labels2y):
-        yield masked_word_lsts,tags
+    for masked_word_lsts, pos_lst,tags in process_tagged_sents(CCR.tagged_sents(filename),batchsize,labels2y):
+        yield masked_word_lsts,pos_lst,tags
 
 def check_embed_file_exist(parsed_args,part):
 
@@ -96,11 +100,11 @@ def check_embed_file_exist(parsed_args,part):
 
 
 def compute_rep_chunk(data_label_generator,CM):
-    for word_lsts,tags in data_label_generator:
+    for word_lsts,pos_lst,tags in data_label_generator:
         context_reps = []
-        for sent in word_lsts:
+        for i,sent in enumerate(word_lsts):
             print (sent)
-            context_rep=CM.compute_context_reps_ensemble([' '.join(sent)], TARGET_W)
+            context_rep=CM.compute_context_reps_ensemble([sent], [pos_lst[i]])
             if context_rep is None:
                 context_reps.append(np.zeros(CM.model_dimension))
             else:
@@ -178,7 +182,7 @@ def parse_args_ner(test_files):
         parser.add_argument('--batchsize', dest='batchsize', type=int,help='batchsize',default=100)
         parser.add_argument('--lr',dest='lr',type=float,help='learning rate', default=1e-4)
         parser.add_argument('--ep',dest='epochs',type=int,help='epochs', default=10)
-        parser.add_argument('--n',dest='save_every_n',type=int,help='save every n epochs', default=5)
+        parser.add_argument('--n',dest='save_every_n',type=int,help='save every n epochs', default=20)
         parser.add_argument('--run',dest='n_runs',type=int,help='number of runs of the MLP', default=5)
 
         parser.add_argument('--path',dest='model_path',type=str,help='mlp model path')
@@ -202,7 +206,7 @@ def generate_embed_labels_batch(args,embed_data,batchsize,labels2y,train_or_test
                                                batchsize=batchsize, labels2y=labels2y)
     l=len(embed_data)
     for start in range(0,l,batchsize):
-        yield embed_data[start:min(start+batchsize,l)], next(data_label_generator)[1]
+        yield embed_data[start:min(start+batchsize,l)], next(data_label_generator)[2]
 
 def accuracy(y_pred,y_gold):
     accurate_items=[i for i in range(len(y_pred)) if y_pred[i]==y_gold[i]]
@@ -226,7 +230,7 @@ def validate_per_epoch(embed_dev,args,criterion,labels2y,model,part):
     return accur,loss_dev
 
 
-def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs):
+def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs=5):
     # dtype = torch.float
 
     train_file=h5py.File(embedding_train_fname,'r')
@@ -236,7 +240,7 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs
 
     D_in, D_out = embed_train[0].shape[0], len(labels2y)
 
-    for run in runs:
+    for run in range(runs):
         model=TwoLayerNet(D_in,H,D_out)
         criterion = torch.nn.CrossEntropyLoss()
 
@@ -354,17 +358,17 @@ if __name__ == "__main__":
     # 1. load args
     args = parse_args_ner(test_files=
                       {
-                          # 'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
-                       # 'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
+                          'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
+                       'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
                        # 'w2salience_f': '../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab',
                        # 'matrix_f': '../models/ALaCarte/transform/wiki_all_transform.bin',
-                          'elmo_param_file': [
-                              "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json",
-                              "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"],
+                       #    'elmo_param_file': [
+                       #        "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json",
+                       #        "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"],
 
                           'data':'./eval_data/emerging_entities/',
-                       'train_or_test':'train',
-                       'model_type':ELMO,
+                       'train_or_test':'test',
+                       'model_type':CONTEXT2VEC_SUB__SKIPGRAM,
                        'output_dir':'./results/ner/',
                           'batchsize':100,
                           'lr':0.001,
@@ -373,7 +377,7 @@ if __name__ == "__main__":
                           'save_every_n':20,
                           'gpu':-1,
                           'n_result':20,
-                          'model_path':'./results/ner/train_context2vec-elmo_MODEL-wiki.params.14.h5_epoch780_accur466_loss1.1372770071029663'
+                          'model_path':'./results/ner/train_context2vec-skipgram__skipgram_MODEL-wiki.params.14_wiki_all.sent.split.model.h5_run0_epoch720_accur433_loss1.518436074256897'
                        })
 
 
@@ -401,7 +405,7 @@ if __name__ == "__main__":
         test_data_embed_fname=write_embedding_tofile(args,'test')
         y_pred=test(path=args.model_path,test_data_embed_fname=test_data_embed_fname,H=Hidden_unit,labels2y=LABELS2Y)
         pred_conll=test_output(y_pred=y_pred,args=args,LABELS=LABELS,data_fname=PARTITION['test'])
-        output_conll_to_file(pred_conll,output_fname=test_data_embed_fname+'.output')
+        output_conll_to_file(pred_conll,output_fname=test_data_embed_fname+'.'+args.model_path.split('_')[-4]+'.output')
         #test
         pass
 

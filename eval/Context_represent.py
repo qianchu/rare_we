@@ -32,6 +32,7 @@ DTYPE = 'float64'
 ALACARTE_FLOAT = np.float32
 ELMO='elmo'
 CONTEXT2VEC_SUB_ELMO='context2vec-elmo'
+ELMO_WITH_TARGET='elmo_with_target'
 
 stopw = stopwords.words('english')
 stopw = [word.encode('utf-8') for word in stopw]
@@ -66,6 +67,7 @@ def read_context2vec_model(context2vec_param_file, gpu):
 def load_model_fromfile(context2vec_param_file,skipgram_param_file,elmo_param_file,gpu):
     context2vec_modelreader_out=None
     model_skipgram_out=None
+    elmo=None
     if type(context2vec_param_file) == str:
         context2vec_modelreader_out = read_context2vec_model(context2vec_param_file, gpu)
     if type(skipgram_param_file) == str:
@@ -96,10 +98,10 @@ def read_context2vec(model_reader):
 
 
 def process_sent(test_s,test_w):
-    test_s=test_s.replace(test_w, ' '+test_w+' ')
+    # test_s=test_s.replace(test_w, ' '+test_w+' ')
     words=test_s.split()
-    pos=words.index(test_w)
-    return words,pos
+    # pos=words.index(test_w)
+    return words,test_w
 
 
 def load_w2salience(model_w2v,w2salience_f):
@@ -166,8 +168,7 @@ class ContextModel():
             self.model_elmo=elmo_model
             self.model_dimension=self.model_elmo.get_output_dim()
      
-    def compute_context_rep(self,test_s,test_w,model):
-        words,pos=process_sent(test_s,test_w)
+    def compute_context_rep(self,words,pos,model):
         if model==CONTEXT2VEC:
             context_rep= self.context2vec_model.context2vec(words, pos)
         if model==ELMO:
@@ -180,6 +181,9 @@ class ContextModel():
             context_rep=self.skipgram_context(model,words=words, pos=pos,stopw_rm=False)
         elif model==CONTEXT2VEC_SUB_ELMO:
             context_rep=self.context2vec_sub_elmo(words,pos)
+        elif model==ELMO_WITH_TARGET:
+            context_rep=self.elmo_context_batch([words],[pos],None)[0]
+
         else:
             print ('WARNING: incorrect model type{0}'.format(model))
         return context_rep
@@ -189,16 +193,15 @@ class ContextModel():
         context_out=[]
         for test_id in range(len(test_ss)):
             test_s=test_ss[test_id]
-            test_s=test_s.lower().strip()
-            context_rep=self.compute_context_rep(test_s, test_w, model)
+            context_rep=self.compute_context_rep(test_s, test_w[test_id], model)
             if context_rep is not None:
                 context_out.append(context_rep)
         return context_out
     
-    def compute_context_reps_ensemble(self,test_ss,test_w):
+    def compute_context_reps_ensemble(self,test_ss,test_w_lst):
         context_out_ensemble=[]
         for model in self.model_type.split('__'):
-            contexts_out=self.compute_context_reps(test_ss,test_w,model)
+            contexts_out=self.compute_context_reps(test_ss,test_w_lst,model)
             if contexts_out:
                 context_out=self.compute_context_reps_aggregate(contexts_out,model)
                 context_out_ensemble.append(context_out)
@@ -222,9 +225,9 @@ class ContextModel():
 
 
     def elmo_context_batch(self,words_lsts,pos_lst,replace_w_lst):
-
-        for i  in range(len(words_lsts)):
-             words_lsts[i][pos_lst[i]]=replace_w_lst[i]
+        if replace_w_lst is not None:
+            for i  in range(len(words_lsts)):
+                 words_lsts[i][pos_lst[i]]=replace_w_lst[i]
         character_ids = batch_to_ids(words_lsts)
         context_reps = [context_per_sentence[pos_lst[i]] for i,context_per_sentence in enumerate(self.model_elmo(character_ids)['elmo_representations'][0].detach().numpy())]
         return context_reps
