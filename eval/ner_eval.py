@@ -162,8 +162,10 @@ def parse_args_ner(test_files):
         parser.add_argument('--cm', type=str,
                             help='context2vec_param_file', dest='context2vec_param_file', default=None)
         parser.add_argument('--sm', type=str, default=None, dest='skipgram_param_file', help='skipgram_param_file')
+        parser.add_argument('--elmo', type=str, default=None, dest='elmo_param_file', help='elmo_param_file')
+
         parser.add_argument('--m', dest='model_type', type=str,
-                            help='<model_type: context2vec; context2vec-skipgram (context2vec substitutes in skipgram space); context2vec-skipgram?skipgram (context2vec substitutes in skipgram space plus skipgram context words)>')
+                            help='<model_type: context2vec; context2vec-skipgram (context2vec substitutes in skipgram space); context2vec-skipgram__skipgram (context2vec substitutes in skipgram space plus skipgram context words)>')
         parser.add_argument('--d', dest='data', type=str, help='data file', default=None)
         parser.add_argument('--g', dest='gpu', type=int, default=-1, help='gpu, default= -1')
         parser.add_argument('--ws', dest='w2salience_f', type=str, default=None, help='word2salience file, optional')
@@ -273,14 +275,15 @@ def test_output(y_pred,args,LABELS,data_fname):
             for pos in range(tag_pos[0],tag_pos[1]):
                 tags_pred[pos]=tags_lst[pos][:2]+LABELS[y_pred[counter]]
             counter+=1
-        pred_conll.append(zip(token_lst, tags_lst, tags_pred))
+        pred_conll.append(list(zip(token_lst, tags_lst, tags_pred)))
     return pred_conll
             # f.write('\n'.join([' '.join(token) for token in zip(token_lst, tags_lst, tags_pred)]))
             # f.write('\n')
 
 def output_conll_to_file(pred_conll,output_fname):
     with open(output_fname, 'w') as f:
-        f.write('\n\n'.join(['\n'.join(['	'.join(token) for token in sent]) for sent in pred_conll ]).encode('utf-8'))
+        print (output_fname)
+        f.write('\n\n'.join(['\n'.join(['	'.join(token) for token in sent]) for sent in pred_conll ]))
 
 
 
@@ -337,7 +340,7 @@ if __name__ == "__main__":
     # 1. load args
     args = parse_args_ner(test_files=
                       {
-                          'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
+                          # 'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
                        # 'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
                        # 'w2salience_f': '../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab',
                        # 'matrix_f': '../models/ALaCarte/transform/wiki_all_transform.bin',
@@ -347,21 +350,20 @@ if __name__ == "__main__":
 
                           'data':'./eval_data/emerging_entities/',
                        'train_or_test':'train',
-                       'model_type':CONTEXT2VEC_SUB_ELMO,
+                       'model_type':ELMO,
                        'output_dir':'./results/ner/',
                           'batchsize':100,
                           'lr':0.001,
                           'epochs':1000,
-                          'save_every_n':2000,
+                          'save_every_n':20,
                           'gpu':-1,
                           'n_result':20,
-                          'model_path':'./results/ner/train_skipgram_isf_wiki_all.sent.split.model.h5_epoch80_accur422_loss1.65266299248'
+                          'model_path':'./results/ner/train_elmo.h5_epoch420_accur454_loss1.1992757320404053'
                        })
 
 
 
 
-    # 2. load data
 
     # 3. gpu setup
     device=gpu_device(args.gpu)
@@ -370,15 +372,11 @@ if __name__ == "__main__":
 
 
     # 4. read embeddings and train
-    # params = {'batch_size': 64,
-    #           'shuffle': True,
-    #           'num_workers': 6}
-    # max_epochs = 100
 
     if args.train_or_test=='train':
         print ('load data>>')
         train_data_embed_fname=write_embedding_tofile(args,'train')
-        dev_data_embed_fname=write_embedding_tofile(args,'test')
+        dev_data_embed_fname=write_embedding_tofile(args,'dev')
         print ('train...')
         # train
         train(embedding_train_fname=train_data_embed_fname,embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=Hidden_unit)
