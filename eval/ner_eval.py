@@ -167,7 +167,7 @@ def parse_args_ner(test_files):
         parser.add_argument('--cm', type=str,
                             help='context2vec_param_file', dest='context2vec_param_file', default=None)
         parser.add_argument('--sm', type=str, default=None, dest='skipgram_param_file', help='skipgram_param_file')
-        parser.add_argument('--elmo',type=str, default=None, dest='elmo filename',nargs='+',help='elmo_param_file')
+        parser.add_argument('--elmo',type=str, default=None, dest='elmo_param_file',nargs='+',help='elmo_param_file')
 
         parser.add_argument('--m', dest='model_type', type=str,
                             help='<model_type: context2vec; context2vec-skipgram (context2vec substitutes in skipgram space); context2vec-skipgram__skipgram (context2vec substitutes in skipgram space plus skipgram context words)>')
@@ -359,7 +359,7 @@ if __name__ == "__main__":
     args = parse_args_ner(test_files=
                       {
                           'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
-                       'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
+                       # 'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
                        # 'w2salience_f': '../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab',
                        # 'matrix_f': '../models/ALaCarte/transform/wiki_all_transform.bin',
                        #    'elmo_param_file': [
@@ -368,7 +368,7 @@ if __name__ == "__main__":
 
                           'data':'./eval_data/emerging_entities/',
                        'train_or_test':'train',
-                       'model_type':CONTEXT2VEC_SUB,
+                       'model_type':CONTEXT2VEC,
                        'output_dir':'./results/ner/',
                           'batchsize':100,
                           'lr':0.001,
@@ -377,7 +377,7 @@ if __name__ == "__main__":
                           'save_every_n':20,
                           'gpu':-1,
                           'n_result':20,
-                          'model_path':'./results/ner/train_context2vec-skipgram__skipgram_MODEL-wiki.params.14_wiki_all.sent.split.model.h5_run0_epoch720_accur433_loss1.518436074256897'
+                          'model_path':'./results/ner/train_alacarte_wiki_all.sent.split.model.h5_run0_epoch60_accur410_loss1.5757191181182861'
                        })
 
 
