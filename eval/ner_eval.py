@@ -167,7 +167,7 @@ def parse_args_ner(test_files):
         parser.add_argument('--cm', type=str,
                             help='context2vec_param_file', dest='context2vec_param_file', default=None)
         parser.add_argument('--sm', type=str, default=None, dest='skipgram_param_file', help='skipgram_param_file')
-        parser.add_argument('--elmo', type=str, default=None, dest='elmo_param_file', help='elmo_param_file')
+        parser.add_argument('--elmo',type=str, default=None, dest='elmo filename',nargs='+',help='elmo_param_file')
 
         parser.add_argument('--m', dest='model_type', type=str,
                             help='<model_type: context2vec; context2vec-skipgram (context2vec substitutes in skipgram space); context2vec-skipgram__skipgram (context2vec substitutes in skipgram space plus skipgram context words)>')
@@ -367,8 +367,8 @@ if __name__ == "__main__":
                        #        "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"],
 
                           'data':'./eval_data/emerging_entities/',
-                       'train_or_test':'test',
-                       'model_type':CONTEXT2VEC_SUB__SKIPGRAM,
+                       'train_or_test':'train',
+                       'model_type':CONTEXT2VEC_SUB,
                        'output_dir':'./results/ner/',
                           'batchsize':100,
                           'lr':0.001,
