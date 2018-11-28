@@ -171,7 +171,7 @@ class ContextModel():
     def compute_context_rep(self,words,pos,model):
         if model==CONTEXT2VEC:
             context_rep= self.context2vec_model.context2vec(words, pos)
-        if model==ELMO:
+        elif model==ELMO:
             context_rep=self.elmo_context_batch([words],[pos],[''])[0]
         elif model==CONTEXT2VEC_SUB:
             context_rep=self.context2vec_sub(words,pos)
