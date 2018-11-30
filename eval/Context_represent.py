@@ -33,6 +33,7 @@ ALACARTE_FLOAT = np.float32
 ELMO='elmo'
 CONTEXT2VEC_SUB_ELMO='context2vec-elmo'
 ELMO_WITH_TARGET='elmo_with_target'
+CONTEXT2VEC_SUB___SKIPGRAM='context2vec-skipgram___skipgram'
 
 stopw = stopwords.words('english')
 stopw = [word.encode('utf-8') for word in stopw]
@@ -167,6 +168,8 @@ class ContextModel():
             #To do elmo vocav
             self.model_elmo=elmo_model
             self.model_dimension=self.model_elmo.get_output_dim()
+        elif self.model_type==CONTEXT2VEC_SUB___SKIPGRAM:
+            self.model_dimension=self.model_skipgram.wv.vectors[0].shape[0]*2
      
     def compute_context_rep(self,words,pos,model):
         if model==CONTEXT2VEC:
@@ -199,14 +202,22 @@ class ContextModel():
         return context_out
     
     def compute_context_reps_ensemble(self,test_ss,test_w_lst):
-        context_out_ensemble=[]
-        for model in self.model_type.split('__'):
-            contexts_out=self.compute_context_reps(test_ss,test_w_lst,model)
-            if contexts_out:
-                context_out=self.compute_context_reps_aggregate(contexts_out,model)
-                context_out_ensemble.append(context_out)
-        context_out=sum(context_out_ensemble)/len(context_out_ensemble) if len(context_out_ensemble)!= 0 else None
-        return context_out
+        context_out_concate=[]
+        for ensemble_model in self.model_type.split('___'):
+            context_out_ensemble = []
+            for model in ensemble_model.split('__'):
+                contexts_out=self.compute_context_reps(test_ss,test_w_lst,model)
+                if contexts_out:
+                    context_out=self.compute_context_reps_aggregate(contexts_out,model)
+                    context_out_ensemble.append(context_out)
+            context_out=sum(context_out_ensemble)/len(context_out_ensemble) if len(context_out_ensemble)!= 0 else None
+            context_out_concate.append(context_out)
+            if context_out is None:
+                return None
+        context_out_concate=self.xp.concatenate(context_out_concate)
+        print ('model dimension is {0}'.format(context_out_concate.shape))
+
+        return context_out_concate
     
     def compute_context_reps_aggregate(self,contexts_out,model):
 
