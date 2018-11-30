@@ -223,20 +223,27 @@ def validate_per_epoch(embed_dev,args,criterion,labels2y,model,part):
 
         y_pred_dev=model(torch.tensor(data_batch).float())
         y_pred_dev_argmax = torch.max(y_pred_dev,1)[1]
+        print ('argmax',y_pred_dev_argmax[:10])
+        print ('pred',y_pred_dev[:10])
         y = torch.max(torch.tensor(y), 1)[1]
+        print ('y',y[:10])
         accur+=accuracy(y_pred_dev_argmax, y)
         loss_dev_per_batch = criterion(y_pred_dev, y)
         loss_dev+=loss_dev_per_batch.item()
     return accur,loss_dev
 
 
-def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs=5):
+def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs=5,embedding_test_fname=None):
     # dtype = torch.float
 
     train_file=h5py.File(embedding_train_fname,'r')
     embed_train=train_file['data']
     dev_file = h5py.File(embedding_dev_fname,'r')
     embed_dev = dev_file['data']
+
+    if embedding_test_fname is not None:
+        test_file = h5py.File(embedding_test_fname, 'r')
+        embed_test = test_file['data']
 
     D_in, D_out = embed_train[0].shape[0], len(labels2y)
 
@@ -265,8 +272,14 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs
                 # break
             print ('training loss per epoch: {0},epoch {1}'.format(loss_per_epoch,t))
             accur_dev,loss_dev=validate_per_epoch(embed_dev=embed_dev,args=args,criterion=criterion,labels2y=labels2y,model=model,part=os.path.basename(embedding_dev_fname).split('_')[0])
-
             print ('dev accuracy per epoch: {0}, loss is {1}'.format(accur_dev,loss_dev))
+
+            if embedding_test_fname is not None:
+                accur_test, loss_test = validate_per_epoch(embed_dev=embed_test, args=args, criterion=criterion,
+                                                         labels2y=labels2y, model=model,
+                                                         part=os.path.basename(embedding_test_fname).split('_')[0])
+
+                print ('test accuracy per epoch: {0}, loss is {1}'.format(accur_test,loss_test))
 
             if t%args.save_every_n==0 and t>=args.save_every_n:
                 if accur_dev>accur_dev_best and loss_dev<loss_dev_best:
@@ -274,6 +287,9 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs
                     if epoch_best>0:
                         os.remove(embedding_train_fname+'_run{3}_epoch{0}_accur{1}_loss{2}'.format(epoch_best,accur_dev_best,loss_dev_best,run))
                     epoch_best,accur_dev_best,loss_dev_best=t,accur_dev,loss_dev
+                elif t-epoch_best> 200:
+                    break
+
 
 
     train_file.close()
@@ -353,12 +369,12 @@ if __name__ == "__main__":
     PARTITION = {'train': 'wnut17train.conll', 'test': 'emerging.test.annotated', 'dev': 'emerging.dev.conll'}
     LABELS2Y=from_label_to_y(LABELS)
     start_time = time.time()
-    Hidden_unit=200
+    Hidden_unit=50
 
     # 1. load args
     args = parse_args_ner(test_files=
                       {
-                          'context2vec_param_file': '../models/context2vec/model_dir/MODEL-wiki.params.14',
+                          'context2vec_param_file': '../models/context2vec/model_dir/MODEL-1B-300dim.10',
                        # 'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
                        # 'w2salience_f': '../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab',
                        # 'matrix_f': '../models/ALaCarte/transform/wiki_all_transform.bin',
@@ -368,16 +384,16 @@ if __name__ == "__main__":
 
                           'data':'./eval_data/emerging_entities/',
                        'train_or_test':'train',
-                       'model_type':CONTEXT2VEC,
+                       'model_type':CONTEXT2VEC_SUB_ELMO,
                        'output_dir':'./results/ner/',
                           'batchsize':100,
-                          'lr':0.001,
-                          'epochs':1000,
+                          'lr':0.01,
+                          'epochs':3000,
                           'n_runs':5,
-                          'save_every_n':20,
+                          'save_every_n':20000,
                           'gpu':-1,
                           'n_result':20,
-                          'model_path':'./results/ner/train_alacarte_wiki_all.sent.split.model.h5_run0_epoch60_accur410_loss1.5757191181182861'
+                          'model_path':'./results/ner/train_context2vec-elmo_context2vec.ukwac.model.params.h5_run4_epoch640_accur471_loss1.109819769859314'
                        })
 
 
@@ -396,9 +412,10 @@ if __name__ == "__main__":
         print ('load data>>')
         train_data_embed_fname=write_embedding_tofile(args,'train')
         dev_data_embed_fname=write_embedding_tofile(args,'dev')
+        test_data_embed_fname=write_embedding_tofile(args,'test')
         print ('train...')
         # train
-        train(embedding_train_fname=train_data_embed_fname,embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=Hidden_unit,runs=args.n_runs)
+        train(embedding_train_fname=train_data_embed_fname,embedding_test_fname=test_data_embed_fname, embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=Hidden_unit,runs=args.n_runs)
         # validation
     # read embeddings and test
     elif args.train_or_test=='test':
