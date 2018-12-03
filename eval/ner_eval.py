@@ -5,10 +5,11 @@ __author__ = 'qianchu_liu'
 from eval.Context_represent import *
 from nltk.corpus.reader.conll import ConllCorpusReader
 from copy import deepcopy
-import os
 import h5py
 import torch
 import os
+from collections import defaultdict
+
 
 
 
@@ -35,7 +36,25 @@ def return_tag_position(tagged_sent):
             if flag_tag_found:
                 tags_position .append((start,position))
                 flag_tag_found=False
+    # if flag_tag_found:
+    #     tags_position.append((start,position+1))
     return tags_position
+
+# def return_tag_position_test(tagged_sent):
+#     tags_position=[]
+#     flag_tag_found=False
+#     for position,word_tag in enumerate(tagged_sent):
+#         if word_tag[1]!=u'O':
+#             if not flag_tag_found:
+#                 start=position
+#                 flag_tag_found=True
+#         else:
+#             if flag_tag_found:
+#                 tags_position .append((start,position))
+#                 flag_tag_found=False
+#     if flag_tag_found:
+#         tags_position.append((start,position+1))
+#     return tags_position
 
 def from_label_to_y(labels):
     label2y={}
@@ -132,7 +151,7 @@ def write_embedding_tofile(args,part) :
         context2vec_modelreader, model_skipgram,model_elmo = load_model_fromfile(
             skipgram_param_file=args.skipgram_param_file,
             context2vec_param_file=args.context2vec_param_file, elmo_param_file=args.elmo_param_file,gpu=args.gpu)
-        CM = ContextModel(model_type=args.model_type, context2vec_modelreader=context2vec_modelreader,
+        CM = ContextModel(model_type=model_type, context2vec_modelreader=context2vec_modelreader,
                           skipgram_model=model_skipgram, elmo_model=model_elmo,n_result=args.n_result, ws_f=args.w2salience_f,
                           matrix_f=args.matrix_f)
         hf = h5py.File(embedding_fname,'w')
@@ -208,6 +227,35 @@ def generate_embed_labels_batch(args,embed_data,batchsize,labels2y,train_or_test
     for start in range(0,l,batchsize):
         yield embed_data[start:min(start+batchsize,l)], next(data_label_generator)[2]
 
+def calculate_f1(y_pred,y_gold):
+    f1_lst=[]
+    result_dict=defaultdict(lambda: defaultdict(float))
+    for i,tag in enumerate(list(y_gold)):
+        if y_pred[i]==tag:
+            result_dict[int(tag)]['correct']+=1
+        else:
+            result_dict[int(tag)]['fn']+=1
+            result_dict[int(y_pred[i])]['fp']+=1
+    for entity in result_dict:
+        try:
+            precision=result_dict[entity]['correct']/(result_dict[entity]['correct']+result_dict[entity]['fn'])
+        except ZeroDivisionError as e:
+            precision=0.
+        try:
+            recall=result_dict[entity]['correct']/(result_dict[entity]['correct']+result_dict[entity]['fp'])
+        except:
+            recall=0.
+        try:
+            f1= 2*((precision*recall)/(precision+recall))
+        except:
+            f1=0
+        f1_lst.append(f1)
+        # print ('==entity {0} precision {1} recall {2} f1 {3}'.format(entity,precision,recall,f1))
+    f1_macro=sum(f1_lst)/len(f1_lst)
+    print ('==f1 mean {0}'.format(f1_macro))
+    return f1_macro
+
+
 def accuracy(y_pred,y_gold):
     accurate_items=[i for i in range(len(y_pred)) if y_pred[i]==y_gold[i]]
     return len(accurate_items)
@@ -215,27 +263,31 @@ def validate_per_epoch(embed_dev,args,criterion,labels2y,model,part):
     accur=0
     loss_dev=0
     for data_batch,y in generate_embed_labels_batch(args, embed_dev,len(embed_dev), labels2y,part):
-        # y_pred_dev = model(torch.tensor(data_batch).float())
-        #
-        # y = torch.max(torch.tensor(y), 1)[1]
-        # loss_dev_per_batch = criterion(y_pred_dev, y)
-        # loss_dev+=loss_dev_per_batch.item()
-
+        # data_batch,y=filter_data(data_batch,y)
         y_pred_dev=model(torch.tensor(data_batch).float())
         y_pred_dev_argmax = torch.max(y_pred_dev,1)[1]
-        print ('argmax',y_pred_dev_argmax[:10])
-        print ('pred',y_pred_dev[:10])
+        # print ('pred',y_pred_dev[:10])
+        # print ('argmax',y_pred_dev_argmax[:10])
         y = torch.max(torch.tensor(y), 1)[1]
-        print ('y',y[:10])
+        # print ('y',y[:10])
         accur+=accuracy(y_pred_dev_argmax, y)
         loss_dev_per_batch = criterion(y_pred_dev, y)
         loss_dev+=loss_dev_per_batch.item()
-    return accur,loss_dev
+    f1_macro=calculate_f1(y_pred_dev_argmax, y)
+    return accur,loss_dev,f1_macro
+
+def filter_data(data_batch,y):
+    y=[(i,item) for i,item in enumerate(y) if item[0]==1 or item[1]==1]
+    # print (type(data_batch),data_batch.shape)
+    item_lst,y=zip(*y)
+    data_batch=data_batch[list(item_lst)]
+    return data_batch,list(y)
+
 
 
 def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs=5,embedding_test_fname=None):
     # dtype = torch.float
-
+    STOP_EPOCH_NO=100
     train_file=h5py.File(embedding_train_fname,'r')
     embed_train=train_file['data']
     dev_file = h5py.File(embedding_dev_fname,'r')
@@ -249,20 +301,26 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs
 
     for run in range(runs):
         model=TwoLayerNet(D_in,H,D_out)
+        # print ('WEIGHTS',WEIGHTS)
         criterion = torch.nn.CrossEntropyLoss()
-
         accur_dev_best=0
+        f1_macro_dev_best=0
         loss_dev_best=math.inf
         epoch_best=0
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
+        accur_train=0
         for t in range(args.epochs):
             loss_per_epoch=0
             for data_batch,y in generate_embed_labels_batch(args,embed_train,args.batchsize,labels2y,os.path.basename(embedding_train_fname).split('_')[0]):
-
                 # Forward pass: Compute predicted y by passing x to the model
+                # data_batch,y=filter_data(data_batch,y)
                 y_pred = model(torch.tensor(data_batch).float())
+                y_pred_train_argmax = torch.max(y_pred, 1)[1]
+
                 # Compute and print loss
                 y=torch.max(torch.tensor(y),1)[1]
+                accur_train += accuracy(y_pred_train_argmax, y)
+
                 loss=criterion(y_pred,y)
                 loss_per_epoch+=loss.item()
                 # Zero gradients, perform a backward pass, and update the weights.
@@ -270,24 +328,26 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs
                 loss.backward()
                 optimizer.step()
                 # break
-            print ('training loss per epoch: {0},epoch {1}'.format(loss_per_epoch,t))
-            accur_dev,loss_dev=validate_per_epoch(embed_dev=embed_dev,args=args,criterion=criterion,labels2y=labels2y,model=model,part=os.path.basename(embedding_dev_fname).split('_')[0])
+            print ('training loss per epoch: {0}, accur {2},epoch {1}'.format(loss_per_epoch,t,accur_train))
+            accur_train=0
+            accur_dev,loss_dev,f1_macro_dev=validate_per_epoch(embed_dev=embed_dev,args=args,criterion=criterion,labels2y=labels2y,model=model,part=os.path.basename(embedding_dev_fname).split('_')[0])
             print ('dev accuracy per epoch: {0}, loss is {1}'.format(accur_dev,loss_dev))
 
             if embedding_test_fname is not None:
-                accur_test, loss_test = validate_per_epoch(embed_dev=embed_test, args=args, criterion=criterion,
+                accur_test, loss_test,f1_macro_test = validate_per_epoch(embed_dev=embed_test, args=args, criterion=criterion,
                                                          labels2y=labels2y, model=model,
                                                          part=os.path.basename(embedding_test_fname).split('_')[0])
 
                 print ('test accuracy per epoch: {0}, loss is {1}'.format(accur_test,loss_test))
 
             if t%args.save_every_n==0 and t>=args.save_every_n:
-                if accur_dev>accur_dev_best and loss_dev<loss_dev_best:
-                    torch.save(model.state_dict(), embedding_train_fname+'_run{3}_epoch{0}_accur{1}_loss{2}'.format(t,accur_dev,loss_dev,run))
+                # if f1_macro_dev>f1_macro_dev_best: #and loss_dev<loss_dev_best:
+                if accur_dev > accur_dev_best and loss_dev<loss_dev_best:
+                    torch.save(model.state_dict(), embedding_train_fname+'_run{2}_epoch{0}_accur{3}_f1macro{1}'.format(t,f1_macro_test,run,accur_dev))
                     if epoch_best>0:
-                        os.remove(embedding_train_fname+'_run{3}_epoch{0}_accur{1}_loss{2}'.format(epoch_best,accur_dev_best,loss_dev_best,run))
-                    epoch_best,accur_dev_best,loss_dev_best=t,accur_dev,loss_dev
-                elif t-epoch_best> 200:
+                        os.remove(embedding_train_fname+'_run{2}_epoch{0}_accur{3}_f1macro{1}'.format(epoch_best,f1_macro_test_best,run,accur_dev_best))
+                    epoch_best,accur_dev_best,loss_dev_best,f1_macro_test_best=t,accur_dev,loss_dev,f1_macro_test
+                elif t-epoch_best> STOP_EPOCH_NO:
                     break
 
 
@@ -298,6 +358,7 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs
 def test_output(y_pred,args,LABELS,data_fname):
     CCR = ConllCorpusReader(root=args.data, fileids='.conll',
                             columntypes=('words', 'pos', 'ne', 'chunk'))
+    print (data_fname)
     tagged_sents=CCR.tagged_sents(data_fname)
     pred_conll=[]
     counter=0
@@ -308,6 +369,7 @@ def test_output(y_pred,args,LABELS,data_fname):
         for tag_pos in tags_position:
             for pos in range(tag_pos[0],tag_pos[1]):
                 tags_pred[pos]=tags_lst[pos][:2]+LABELS[y_pred[counter]]
+
             counter+=1
         pred_conll.append(list(zip(token_lst, tags_lst, tags_pred)))
     return pred_conll
@@ -333,7 +395,9 @@ def test(path,test_data_embed_fname,H,labels2y):
     for data_batch, y in generate_embed_labels_batch(args, embed_test, len(embed_test), labels2y, os.path.basename(test_data_embed_fname).split('_')[0]):
         # Forward pass: Compute predicted y by passing x to the model
         y_pred = torch.max(model(torch.tensor(data_batch).float()),1)[1]
+        print (set([int(i)for i in y_pred]))
         y = torch.max(torch.tensor(y), 1)[1]
+        print (len(y_pred),len(y),len(data_batch))
         print ('accuracy is',accuracy(y_pred,y))
 
     test_file.close()
@@ -366,7 +430,10 @@ if __name__ == "__main__":
     print ('start')
     import time
     LABELS=[ u'person',u'location',u'group',u'creative-work',u'corporation',u'product']
-    PARTITION = {'train': 'wnut17train.conll', 'test': 'emerging.test.annotated', 'dev': 'emerging.dev.conll'}
+    WEIGHTS=[660,548,264,140,221,142]
+    WEIGHTS_SUM=float(sum(WEIGHTS))
+    WEIGHTS=[(1-float(w/WEIGHTS_SUM)) for w in WEIGHTS]
+    PARTITION = {'train': 'wnut17train.conll', 'test': 'emerging.test.annotated.nolastline', 'dev': 'emerging.dev.conll'}
     LABELS2Y=from_label_to_y(LABELS)
     start_time = time.time()
     Hidden_unit=50
@@ -374,26 +441,26 @@ if __name__ == "__main__":
     # 1. load args
     args = parse_args_ner(test_files=
                       {
-                          'context2vec_param_file': '../models/context2vec/model_dir/MODEL-1B-300dim.10',
+                          # 'context2vec_param_file': '../models/context2vec/model_dir/context2vec.ukwac.model.params',
                        # 'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
                        # 'w2salience_f': '../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab',
                        # 'matrix_f': '../models/ALaCarte/transform/wiki_all_transform.bin',
-                       #    'elmo_param_file': [
-                       #        "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json",
-                       #        "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"],
+                          'elmo_param_file': [
+                              "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json",
+                              "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"],
 
                           'data':'./eval_data/emerging_entities/',
-                       'train_or_test':'train',
-                       'model_type':CONTEXT2VEC_SUB_ELMO,
+                       'train_or_test':'test',
+                       'model_type':ELMO,
                        'output_dir':'./results/ner/',
-                          'batchsize':100,
+                          'batchsize':10,
                           'lr':0.01,
                           'epochs':3000,
                           'n_runs':5,
                           'save_every_n':20000,
                           'gpu':-1,
                           'n_result':20,
-                          'model_path':'./results/ner/train_context2vec-elmo_context2vec.ukwac.model.params.h5_run4_epoch640_accur471_loss1.109819769859314'
+                          'model_path':'./results/ner/train_elmo.h5_run0_epoch8_accur465_f1macro0.3010528750426254'
                        })
 
 
@@ -410,17 +477,24 @@ if __name__ == "__main__":
 
     if args.train_or_test=='train':
         print ('load data>>')
+
         train_data_embed_fname=write_embedding_tofile(args,'train')
         dev_data_embed_fname=write_embedding_tofile(args,'dev')
         test_data_embed_fname=write_embedding_tofile(args,'test')
         print ('train...')
-        # train
+                # train
         train(embedding_train_fname=train_data_embed_fname,embedding_test_fname=test_data_embed_fname, embedding_dev_fname=dev_data_embed_fname,device=device,args=args, labels2y=LABELS2Y,H=Hidden_unit,runs=args.n_runs)
         # validation
     # read embeddings and test
     elif args.train_or_test=='test':
-        test_data_embed_fname=write_embedding_tofile(args,'test')
-        y_pred=test(path=args.model_path,test_data_embed_fname=test_data_embed_fname,H=Hidden_unit,labels2y=LABELS2Y)
+
+        if args.model_type=='major_vote':
+            y_pred=[0]*5000
+            test_data_embed_fname=os.path.join(args.output_dir,'test')
+            args.model_path='majorvote_majorvote_majorvote_majorvote'
+        else:
+            test_data_embed_fname=write_embedding_tofile(args,'test')
+            y_pred=test(path=args.model_path,test_data_embed_fname=test_data_embed_fname,H=Hidden_unit,labels2y=LABELS2Y)
         pred_conll=test_output(y_pred=y_pred,args=args,LABELS=LABELS,data_fname=PARTITION['test'])
         output_conll_to_file(pred_conll,output_fname=test_data_embed_fname+'.'+args.model_path.split('_')[-4]+'.output')
         #test
