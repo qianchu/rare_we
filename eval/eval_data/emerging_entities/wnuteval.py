@@ -522,10 +522,11 @@ def fmt_results(tokens, all_entities, surface_form=False):
               (100. * results['tokens'].correct / results['tokens'].gold))
         yield('precision: %6.2f%%; ' % (100. * results['tagged'].p))
         yield('recall: %6.2f%%; ' % (100. * results['tagged'].r))
-        yield('FB1: %6.2f\n' % (100. * results['tagged'].f))
+        yield('micro FB1: %6.2f\n' % (100. * results['tagged'].f))
 
     # get results for each entity category
     tags = get_tags(all_entities['gold'])
+    macro_f1=[]
     for tag in sorted(tags):
         entities = {src: filter_entities(entities, lambda e: e.tag == tag)
                     for src, entities in all_entities.items()}
@@ -533,7 +534,9 @@ def fmt_results(tokens, all_entities, surface_form=False):
         yield('%17s: ' % tag)
         yield('precision: %6.2f%%; ' % (100. * results.p))
         yield('recall: %6.2f%%; ' % (100. * results.r))
+        macro_f1.append(100. * results.f)
         yield('FB1: %6.2f  %d\n' % (100. * results.f, results.correct))
+    yield ('macro FB1 {0}'.format(sum(macro_f1)/len(macro_f1)))
 
 
 def main():
