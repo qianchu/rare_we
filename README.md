@@ -10,6 +10,8 @@
    Requirements can be found in /Docker/environment_rare_we_clean.yml
 		
 
+   You can load context2vec models from https://www.github.com/melamud/context2vec/
+
 2. chimeras/nonce/crw evaluation
 
     Usage:eval_script.py [-h] [--f MODEL_PARAM_FILE] [--m MODEL_TYPE]
