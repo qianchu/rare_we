@@ -106,9 +106,15 @@ def load_ner_data_label(root,filename,batchsize,labels2y=None):
     for masked_word_lsts, pos_lst,tags in process_tagged_sents(CCR.tagged_sents(filename),batchsize,labels2y):
         yield masked_word_lsts,pos_lst,tags
 
-def check_embed_file_exist(parsed_args,part):
+def check_embed_file_exist(parsed_args,part,model_type=None):
+    if model_type is None:
+        model_type=parsed_args.model_type
 
-    fn_lst=os.path.join(parsed_args.output_dir,'_'.join([arg.split('/')[-1] for arg in [part,parsed_args.model_type,parsed_args.context2vec_param_file,parsed_args.skipgram_param_file] if arg is not None]))
+    if model_type==ELMO_WITH_TARGET:
+        context2vec_param_file=None
+    else:
+        context2vec_param_file=parsed_args.context2vec_param_file
+    fn_lst=os.path.join(parsed_args.output_dir,'_'.join([arg.split('/')[-1] for arg in [part,model_type,context2vec_param_file,parsed_args.skipgram_param_file] if arg is not None]))
     embedding_fname = fn_lst+'.h5'
     if os.path.isfile(embedding_fname):
         return embedding_fname,True
@@ -141,22 +147,59 @@ def increment_write_h5py(hf,chunk,data_name='data'):
         data.resize((chunk.shape[0]+data.shape[0],)+data.shape[1:])
         data[-chunk.shape[0]:]=chunk
 
-def write_embedding_tofile(args,part) :
+def produce_ensemble_embedding(embedding_fname_lst,hf,ensemble_method):
+    data_embed_lst=[h5py.File(fname, 'r')['data'] for fname in embedding_fname_lst]
+
+    l=len(data_embed_lst[0])
+
+    for start in range(0, l, args.batchsize):
+        ensemble_data_embed_lst=[data_embed[start:min(start + args.batchsize, l)] for data_embed in data_embed_lst]
+        if ensemble_method=='concatenate':
+            ensemble_data_embed=xp.concatenate(ensemble_data_embed_lst,axis=1)
+        elif ensemble_method=='average':
+            ensemble_data_embed=sum(ensemble_data_embed_lst)/len(ensemble_data_embed_lst)
+        else:
+            print ('Warning, ensemble method unknown')
+            exit(1)
+        print(ensemble_data_embed.shape)
+        increment_write_h5py(hf, ensemble_data_embed)
+
+
+def check_ensemble_file_exist(args,part):
+    embedding_f_lst=[]
+
+    for model_type in args.model_type.split('__'):
+        embedding_fname_compon, embedding_file_exist_compon = check_embed_file_exist(args, part,model_type)
+        if embedding_file_exist_compon is False:
+           return None
+        else:
+            embedding_f_lst.append(embedding_fname_compon)
+    return embedding_f_lst
+
+
+def write_embedding_tofile(args,part,ensemble_method='concatenate') :
 
     embedding_fname,embedding_file_exist=check_embed_file_exist(args,part)
     print ('load data from', embedding_fname)
     if not embedding_file_exist:
-        data_label_generator = load_ner_data_label(root=args.data, filename=PARTITION[part],
-                                                   batchsize=args.batchsize)
-        context2vec_modelreader, model_skipgram,model_elmo = load_model_fromfile(
-            skipgram_param_file=args.skipgram_param_file,
-            context2vec_param_file=args.context2vec_param_file, elmo_param_file=args.elmo_param_file,gpu=args.gpu)
-        CM = ContextModel(model_type=model_type, context2vec_modelreader=context2vec_modelreader,
-                          skipgram_model=model_skipgram, elmo_model=model_elmo,n_result=args.n_result, ws_f=args.w2salience_f,
-                          matrix_f=args.matrix_f)
-        hf = h5py.File(embedding_fname,'w')
-        for chunk in compute_rep_chunk(data_label_generator, CM):
-            increment_write_h5py(hf, chunk)
+        hf = h5py.File(embedding_fname, 'w')
+        embeddng_f_lst=check_ensemble_file_exist(args,part)
+        if embeddng_f_lst is not None:
+            produce_ensemble_embedding(embeddng_f_lst,hf,ensemble_method)
+
+
+
+        else:
+            data_label_generator = load_ner_data_label(root=args.data, filename=PARTITION[part],
+                                                       batchsize=args.batchsize)
+            context2vec_modelreader, model_skipgram,model_elmo = load_model_fromfile(
+                skipgram_param_file=args.skipgram_param_file,
+                context2vec_param_file=args.context2vec_param_file, elmo_param_file=args.elmo_param_file,gpu=args.gpu)
+            CM = ContextModel(model_type=args.model_type, context2vec_modelreader=context2vec_modelreader,
+                              skipgram_model=model_skipgram, elmo_model=model_elmo,n_result=args.n_result, ws_f=args.w2salience_f,
+                              matrix_f=args.matrix_f)
+            for chunk in compute_rep_chunk(data_label_generator, CM):
+                increment_write_h5py(hf, chunk)
 
         hf.close()
     return embedding_fname
@@ -304,7 +347,6 @@ def train(embedding_train_fname, embedding_dev_fname,device,args,labels2y,H,runs
         # print ('WEIGHTS',WEIGHTS)
         criterion = torch.nn.CrossEntropyLoss()
         accur_dev_best=0
-        f1_macro_dev_best=0
         loss_dev_best=math.inf
         epoch_best=0
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
@@ -441,7 +483,7 @@ if __name__ == "__main__":
     # 1. load args
     args = parse_args_ner(test_files=
                       {
-                          # 'context2vec_param_file': '../models/context2vec/model_dir/context2vec.ukwac.model.params',
+                          'context2vec_param_file': '../models/context2vec/model_dir/MODEL-1B-300dim.params.10',
                        # 'skipgram_param_file': '../models/wiki_all.model/wiki_all.sent.split.model',
                        # 'w2salience_f': '../corpora/corpora/wiki.all.utf8.sent.split.tokenized.vocab',
                        # 'matrix_f': '../models/ALaCarte/transform/wiki_all_transform.bin',
@@ -450,8 +492,8 @@ if __name__ == "__main__":
                               "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"],
 
                           'data':'./eval_data/emerging_entities/',
-                       'train_or_test':'test',
-                       'model_type':ELMO,
+                       'train_or_test':'train',
+                       'model_type':CONTEXT2VEC_SUB_ELMO__ELMO_WITH_TARGET,
                        'output_dir':'./results/ner/',
                           'batchsize':10,
                           'lr':0.01,
@@ -460,7 +502,7 @@ if __name__ == "__main__":
                           'save_every_n':20000,
                           'gpu':-1,
                           'n_result':20,
-                          'model_path':'./results/ner/train_elmo.h5_run0_epoch8_accur465_f1macro0.3010528750426254'
+                          'model_path':'./results/ner/train_skipgram_isf_wiki_all.sent.split.model.h5_run0_epoch5_accur418_f1macro0.11560737359897838'
                        })
 
 
