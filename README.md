@@ -1,18 +1,28 @@
 # rare_we
 
 1. requirements
+   Option 1: Docker
+   Dockerfile found in /Docker/Dockerfile
+   Bash ./start
+   source activate rare_we_clean
+   
+   Option 2: Conda
+   Requirements can be found in /Docker/environment_rare_we_clean.yml
+		
 
-    nvidia-docker
-    nvidia-docker run  --name context2vec-rw -it -p 8887:8887 -v /home/ql261/rare_we/:/home/rare_we/ chainer/chainer:v4.0.0-python2-lq /bin/bash
+2. chimeras/nonce/crw evaluation
 
-2. chimeras evaluation
+    Usage:eval_script.py [-h] [--f MODEL_PARAM_FILE] [--m MODEL_TYPE]
+                      [--w WEIGHTS [WEIGHTS ...]] [--d DATA] [--g GPU]
+                      [--ws W2SALIENCE_F] [--n_result N_RESULT] [--t TRIALS]
+                      [--c CONTEXT_FLAG] [--ma MATRIX_F]
 
-    Usage:python eval.py <model_param_file> <model_type> <weight> <eval_data> <w2salience>
+  
 
-    example usage: 	nice python -u eval.py ../models/context2vec/model_dir/MODEL-wiki.params.6 context2vec 0 0 ./eval_data/data-chimeras/dataset.l2.fixed.test.txt.punct &> eval_context2vec_6_0_0_l2_punct.log &
+    WEIGHTS (integers in WEIGHT_DICT):
+        
+	WEIGHT_DICT={0:False,1:TOP_MUTUAL_SIM,2:LDA,3:INVERSE_S_FREQ,4:INVERSE_W_FREQ,5:TOP_CLUSTER_DENSITY, 6:SUBSTITUTE_PROB}
 
-    weight:
-    
         TOP_MUTUAL_SIM='top_mutual_sim'
             measure the top n substitutes' mutual similarity (weighted by the top 1 substitutes' compatibility to context)
         
@@ -31,10 +41,9 @@
         SUBSTITUTE_PROB='substitute_prob'
             substitutes weighted by their compatibility to context
 
-        WEIGHT_DICT={0:False,1:TOP_MUTUAL_SIM,2:LDA,3:INVERSE_S_FREQ,4:INVERSE_W_FREQ,5:TOP_CLUSTER_DENSITY, 6:SUBSTITUTE_PROB}
 
 
-    model_type:
+    MODEL_TYPE:
     
         skipgram (context skipgram input vector without stop words)
         
@@ -43,3 +52,20 @@
         context2vec-skipgram(context2vec substitutes in skipgram space)
         
         context2vec-skipgram?skipgram (context2vec substitutes in skipgram space plus skipgram context words)
+
+
+3. Context Evaluation in Rare and Emerging Entity Classification 
+
+python eval_ner.py -h:
+		   [--sm SKIPGRAM_PARAM_FILE]
+                   [--elmo ELMO_PARAM_FILE [ELMO_PARAM_FILE ...]]
+                   [--m MODEL_TYPE] [--d DATA] [--g GPU] [--ws W2SALIENCE_F]
+                   [--n_result N_RESULT] [--ma MATRIX_F] [--tot TRAIN_OR_TEST]
+                   [--output_dir OUTPUT_DIR] [--batchsize BATCHSIZE] [--lr LR]
+                   [--ep EPOCHS] [--n SAVE_EVERY_N] [--run N_RUNS]
+                   [--path MODEL_PATH]
+
+
+
+
+
