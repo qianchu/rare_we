@@ -34,6 +34,7 @@ ELMO='elmo'
 CONTEXT2VEC_SUB_ELMO='context2vec-elmo'
 ELMO_WITH_TARGET='elmo_with_target'
 CONTEXT2VEC_SUB___SKIPGRAM='context2vec-skipgram___skipgram'
+CONTEXT2VEC_SUB_ELMO__ELMO_WITH_TARGET=CONTEXT2VEC_SUB_ELMO+'__'+ELMO_WITH_TARGET
 
 stopw = stopwords.words('english')
 stopw = [word.encode('utf-8') for word in stopw]
