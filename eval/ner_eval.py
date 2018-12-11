@@ -475,7 +475,7 @@ if __name__ == "__main__":
     WEIGHTS=[660,548,264,140,221,142]
     WEIGHTS_SUM=float(sum(WEIGHTS))
     WEIGHTS=[(1-float(w/WEIGHTS_SUM)) for w in WEIGHTS]
-    PARTITION = {'train': 'wnut17train.conll', 'test': 'emerging.test.annotated.nolastline', 'dev': 'emerging.dev.conll'}
+    PARTITION = {'train': 'wnut17train.conll', 'test': 'emerging.test.annotated.modified', 'dev': 'emerging.dev.conll'}
     LABELS2Y=from_label_to_y(LABELS)
     start_time = time.time()
     Hidden_unit=50
