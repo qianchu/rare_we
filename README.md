@@ -11,11 +11,11 @@
 		
 
    We train context2vec models from https://www.github.com/melamud/context2vec/
-   You can load skipgram models from https://github.com/minimalparts/nonce2vec
+   Training corpus and the skipgram models can be found from https://github.com/minimalparts/nonce2vec
 
 2. chimeras/nonce/crw evaluation
 
-    Usage:eval_script.py [-h] [--f MODEL_PARAM_FILE] [--m MODEL_TYPE]
+    Usage:python eval/eval_script.py [-h] [--f MODEL_PARAM_FILE] [--m MODEL_TYPE]
                       [--w WEIGHTS [WEIGHTS ...]] [--d DATA] [--g GPU]
                       [--ws W2SALIENCE_F] [--n_result N_RESULT]
                      
